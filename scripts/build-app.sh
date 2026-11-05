@@ -41,7 +41,7 @@ cat > "$app_dir/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>LocationSimulator</string>
     <key>CFBundleDisplayName</key><string>定位模拟器</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleShortVersionString</key><string>1.0.1</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>

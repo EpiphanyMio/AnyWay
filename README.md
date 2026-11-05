@@ -14,7 +14,7 @@
 
 1. 用数据线将 iPhone 连接到 Mac，在手机上解锁并选择“信任此电脑”。在 iPhone 的“设置 → 隐私与安全性”中开启“开发者模式”，按系统提示重启并确认。
 2. 在 Xcode 的“Window → Devices and Simulators”中确认设备已完成配对和开发者组件准备。实体设备定位通过 [pymobiledevice3 的 DVT 定位服务](https://github.com/doronz88/pymobiledevice3/blob/master/docs/guides/cli-recipes.md#dvt-examples) 实现。
-3. 运行 `bash scripts/install-iphone-support.sh` 安装项目内的 iPhone 支持组件，再用 `bash scripts/build-app.sh` 构建应用。应用内点击“刷新”，选择“iOS 设备”，即可使用单点、路径和清除定位。
+3. 运行 `bash scripts/install-iphone-support.sh` 安装项目内的 iPhone 支持组件。用 Xcode 调试运行或运行 `bash scripts/build-app.sh` 构建应用后，在应用内点击“刷新”，选择“iOS 设备”，即可使用单点、路径和清除定位。
 
 设备需要保持连接，退出应用会结束开发者定位会话。定位服务受 iOS 版本与开发者模式限制；若设备连接失败，应用会显示具体错误。
 
@@ -40,7 +40,7 @@
 ## 安装包
 
 在 Apple Silicon Mac 上运行 `bash scripts/build-pkg.sh`，生成
-`dist/LocationSimulator-1.0-arm64.pkg` 和对应的 `.sha256` 校验文件。把安装包复制到另一台 Apple Silicon Mac 后双击安装，应用会放在“应用程序”文件夹。安装包内包含 iPhone 支持组件，目标电脑无需运行 Python 安装脚本；运行模拟器定位仍需在目标电脑安装 Xcode，实体 iPhone 还需开启开发者模式并完成信任与配对。
+`dist/LocationSimulator-1.0.1-arm64.pkg` 和对应的 `.sha256` 校验文件。把安装包复制到另一台 Apple Silicon Mac 后双击安装，应用会放在“应用程序”文件夹。安装包内包含 iPhone 支持组件，目标电脑无需运行 Python 安装脚本；运行模拟器定位仍需在目标电脑安装 Xcode，实体 iPhone 还需开启开发者模式并完成信任与配对。
 
 目前安装包未使用 Apple Developer ID 签名或公证。若 macOS 拦截从网络下载的安装包，请在“系统设置 → 隐私与安全性”中允许打开；正式公开分发建议使用 Developer ID Installer 证书签名并公证。
 

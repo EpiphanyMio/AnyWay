@@ -10,17 +10,25 @@ final class PhoneBridge: @unchecked Sendable {
     private var activeUDID: String?
 
     private static var supportDirectory: URL {
-        if Bundle.main.bundleURL.pathExtension == "app" {
-            if let resources = Bundle.main.resourceURL,
-               FileManager.default.isExecutableFile(
-                   atPath: resources.appendingPathComponent("iphone-venv/bin/python").path
-               ) {
-                return resources
-            }
-            return Bundle.main.bundleURL.deletingLastPathComponent()
+        let projectDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let candidates = [
+            Bundle.main.resourceURL,
+            Bundle.main.bundleURL.deletingLastPathComponent(),
+            projectDirectory.appendingPathComponent(".build"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(".build")
+        ].compactMap { $0 }
+        if let installed = candidates.first(where: {
+            FileManager.default.isExecutableFile(
+                atPath: $0.appendingPathComponent("iphone-venv/bin/python").path
+            )
+        }) {
+            return installed
         }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(".build")
+        return projectDirectory.appendingPathComponent(".build")
     }
 
     private static var pythonURL: URL {

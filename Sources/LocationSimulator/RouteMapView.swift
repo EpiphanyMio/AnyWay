@@ -44,7 +44,10 @@ struct RouteMapView: NSViewRepresentable {
         if coordinator.renderedPoints != points {
             coordinator.renderedPoints = points
             map.removeAnnotations(map.annotations.filter { $0 is RoutePointAnnotation })
+            let markerStep = points.count > 30 ? max(1, points.count / 12) : 1
             for (index, point) in points.enumerated() {
+                if points.count > 1 && index == points.count - 1 && point == points.first { continue }
+                if points.count > 30 && index > 1 && index % markerStep != 0 { continue }
                 let annotation = RoutePointAnnotation()
                 annotation.coordinate = CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
                 annotation.title = "\(index + 1)"
@@ -77,7 +80,7 @@ struct RouteMapView: NSViewRepresentable {
                 map.addAnnotation(annotation)
             }
         }
-        let routeToPreview = previewRoute.isEmpty ? points : previewRoute
+        let routeToPreview = previewRoute.isEmpty ? RouteLoop.closed(points) : previewRoute
         if coordinator.renderedPreviewRoute != routeToPreview
             || coordinator.renderedVariation != variationMeters
             || coordinator.renderedSeed != previewSeed {

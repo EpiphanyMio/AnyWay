@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @StateObject private var controller = SimulatorController()
     @StateObject private var placeSearch = PlaceSearchController()
+    @AppStorage("restoreLastRoute") private var restoreLastRoute = true
+    @AppStorage("autoRefreshDevices") private var autoRefreshDevices = true
     @State private var name = "我的路线"
     @State private var latitude = "39.9042"
     @State private var longitude = "116.4074"
@@ -13,11 +15,25 @@ struct ContentView: View {
     @State private var textPending = false
     @State private var fitRevision = 0
     @State private var speed = "5"
+    @State private var paceMinutes = "3"
+    @State private var paceSeconds = "20"
     @State private var jitter = "15"
     @State private var passes = "2"
     @State private var pathVariation = "2"
+    @State private var dynamicSpeed = false
+    @State private var dynamicMode: DynamicSpeedMode = .automatic
+    @State private var dynamicPreset: DynamicSpeedPreset = .campus
+    @State private var recoveryEveryKm = "0.8"
+    @State private var lowPaceMinutes = "10"
+    @State private var lowPaceSeconds = "0"
+    @State private var recoverySeconds = "25"
+    @State private var trackSide: TrackSide = .right
     @State private var editorMode = 0
     @State private var selectingSinglePoint = false
+    @State private var showingSettings = false
+    @State private var showingSearchHistory = false
+    @State private var hasLoadedDraft = false
+    @State private var hasSavedDraft = false
 
     private let accent = Color.teal
 
@@ -44,7 +60,15 @@ struct ContentView: View {
             .padding(.vertical, 12)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { controller.refresh() }
+        .onAppear {
+            if !hasLoadedDraft { restoreDraftIfNeeded() }
+            if autoRefreshDevices { controller.refresh() }
+        }
+        .onChange(of: routeDraft) { draft in
+            guard hasLoadedDraft else { return }
+            if RouteDraftStore().save(draft) { hasSavedDraft = true }
+        }
+        .sheet(isPresented: $showingSettings) { settingsSheet }
     }
 
     private var header: some View {
@@ -60,6 +84,10 @@ struct ContentView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Button { showingSettings = true } label: {
+                Label("设置", systemImage: "gearshape")
+            }
+            .keyboardShortcut(",", modifiers: .command)
             Button {
                 importConfiguration()
             } label: {
@@ -75,6 +103,40 @@ struct ContentView: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 16)
+    }
+
+    private var settingsSheet: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Label("设置", systemImage: "gearshape").font(.title2.bold())
+                Spacer()
+                Button("完成") { showingSettings = false }
+                    .keyboardShortcut(.defaultAction)
+            }
+            Divider()
+            Toggle("启动时恢复上次路线", isOn: $restoreLastRoute)
+            Text("自动记住路径点、未应用的坐标文本和移动参数；关闭后仍保存编辑内容，但启动时不自动载入。")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("启动时自动刷新设备", isOn: $autoRefreshDevices)
+            Divider()
+            HStack {
+                Text("搜索历史：\(placeSearch.history.count) 条")
+                Spacer()
+                Button("清除搜索历史") { placeSearch.clearHistory() }
+                    .disabled(placeSearch.history.isEmpty)
+            }
+            HStack {
+                Text("上次路线记忆")
+                Spacer()
+                Button("清除路线记忆") {
+                    RouteDraftStore().clear()
+                    hasSavedDraft = false
+                }
+                .disabled(!hasSavedDraft)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
     }
 
     private var mapPanel: some View {
@@ -163,6 +225,37 @@ struct ContentView: View {
                     .textFieldStyle(.plain)
                     .onSubmit { placeSearch.search() }
                     .onChange(of: placeSearch.query) { _ in placeSearch.queryChanged() }
+                Button { showingSearchHistory = true } label: {
+                    Label("搜索历史", systemImage: "clock.arrow.circlepath")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                .help("查看搜索历史")
+                .popover(isPresented: $showingSearchHistory, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("搜索历史").font(.headline)
+                        if placeSearch.history.isEmpty {
+                            Text("暂无搜索记录")
+                                .font(.callout).foregroundStyle(.secondary)
+                        } else {
+                            ForEach(placeSearch.history, id: \.self) { item in
+                                Button {
+                                    placeSearch.searchHistoryItem(item)
+                                    showingSearchHistory = false
+                                } label: {
+                                    Label(item, systemImage: "clock.arrow.circlepath")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Divider()
+                            Button("清除历史") { placeSearch.clearHistory() }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    .padding(14)
+                    .frame(width: 250, alignment: .leading)
+                }
                 if placeSearch.isSearching {
                     ProgressView().controlSize(.small)
                 }
@@ -270,7 +363,7 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     if editorMode == 0 {
-                        Text("在左侧地图单击添加路径点。重复运行时会沿原路折返。")
+                        Text("在左侧地图单击添加路径点。终点会自动连接起点，重复运行时同向绕圈。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -290,14 +383,63 @@ struct ContentView: View {
                     }
                 }
 
+                card("1000 米环形跑道", icon: "figure.run.circle") {
+                    Text("在地图上标出一条长直边的两个端点；模板会补全另一条直边和两端弯道。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("展开方向", selection: $trackSide) {
+                        ForEach(TrackSide.allCases) { side in
+                            Text(side.title).tag(side)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text("方向按第 1 点到第 2 点判断；两点需相距 20～499 米。")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Button("由两个端点生成跑道") { generateTrack() }
+                        .disabled(controller.isRunning)
+                }
+
                 card("移动参数", icon: "speedometer") {
                     HStack(spacing: 8) {
                         field("速度 m/s", text: $speed)
                         field("抖动 ±%", text: $jitter)
-                        field("趟数", text: $passes)
+                        field("圈数", text: $passes)
+                    }
+                    HStack(spacing: 8) {
+                        field("配速 分/公里", text: $paceMinutes)
+                        field("秒/公里", text: $paceSeconds)
+                    }
+                    .onChange(of: paceMinutes) { _ in syncSpeedFromPace() }
+                    .onChange(of: paceSeconds) { _ in syncSpeedFromPace() }
+                    .onChange(of: speed) { _ in syncPaceFromSpeed() }
+                    Toggle("动态速度", isOn: $dynamicSpeed)
+                        .font(.caption)
+                    if dynamicSpeed {
+                        Picker("配置方式", selection: $dynamicMode) {
+                            ForEach(DynamicSpeedMode.allCases, id: \.self) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        if dynamicMode == .automatic {
+                            Picker("自动范例", selection: $dynamicPreset) {
+                                ForEach(DynamicSpeedPreset.allCases, id: \.self) { preset in
+                                    Text(preset.title).tag(preset)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            Text(dynamicPreset.description)
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            field("每隔多少公里进入低速段", text: $recoveryEveryKm)
+                            HStack(spacing: 8) {
+                                field("低速配速 分/公里", text: $lowPaceMinutes)
+                                field("秒/公里", text: $lowPaceSeconds)
+                            }
+                            field("低速持续秒数", text: $recoverySeconds)
+                        }
                     }
                     field("路线偏移上限 m", text: $pathVariation)
-                    Text("每趟生成不同的平滑轨迹；中途路径点带小幅偏差，起终点保持准确。")
+                    Text("每圈生成不同的平滑轨迹；中途路径点带小幅偏差，闭合点保持准确。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -352,6 +494,72 @@ struct ContentView: View {
         textPending = false
     }
 
+    private var routeDraft: RouteDraft {
+        RouteDraft(name: name, latitude: latitude, longitude: longitude,
+                   points: points, routeText: routeText, textPending: textPending,
+                   speed: speed, jitter: jitter, passes: passes,
+                   pathVariation: pathVariation, dynamicSpeed: dynamicSpeed,
+                   dynamicSpeedDraft: DynamicSpeedDraft(
+                    mode: dynamicMode, preset: dynamicPreset,
+                    intervalKilometers: recoveryEveryKm,
+                    lowPaceMinutes: lowPaceMinutes,
+                    lowPaceSeconds: lowPaceSeconds,
+                    recoverySeconds: recoverySeconds),
+                   editorMode: editorMode)
+    }
+
+    private func restoreDraftIfNeeded() {
+        let store = RouteDraftStore()
+        hasSavedDraft = store.hasSavedDraft
+        if restoreLastRoute, let draft = store.load() {
+            name = draft.name
+            latitude = draft.latitude
+            longitude = draft.longitude
+            points = draft.points
+            routeText = draft.routeText
+            textPending = draft.textPending
+            speed = draft.speed
+            if let speedValue = Double(draft.speed),
+               let pace = RunningPace.components(speed: speedValue) {
+                paceMinutes = String(pace.minutes)
+                paceSeconds = String(pace.seconds)
+            }
+            jitter = draft.jitter
+            passes = draft.passes
+            pathVariation = draft.pathVariation
+            dynamicSpeed = draft.dynamicSpeed
+            if let dynamicDraft = draft.dynamicSpeedDraft {
+                dynamicMode = dynamicDraft.mode
+                dynamicPreset = dynamicDraft.preset
+                recoveryEveryKm = dynamicDraft.intervalKilometers
+                lowPaceMinutes = dynamicDraft.lowPaceMinutes
+                lowPaceSeconds = dynamicDraft.lowPaceSeconds
+                recoverySeconds = dynamicDraft.recoverySeconds
+            }
+            editorMode = draft.editorMode
+            fitRevision += 1
+        }
+        hasLoadedDraft = true
+    }
+
+    private func syncSpeedFromPace() {
+        guard let minutes = Int(paceMinutes), let seconds = Int(paceSeconds),
+              let paceSpeed = RunningPace.speed(minutes: minutes, seconds: seconds) else { return }
+        if let currentSpeed = Double(speed),
+           let components = RunningPace.components(speed: currentSpeed),
+           components.minutes == minutes, components.seconds == seconds { return }
+        speed = String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), paceSpeed)
+    }
+
+    private func syncPaceFromSpeed() {
+        guard let value = Double(speed),
+              let components = RunningPace.components(speed: value) else { return }
+        let minutes = String(components.minutes)
+        let seconds = String(components.seconds)
+        if paceMinutes != minutes { paceMinutes = minutes }
+        if paceSeconds != seconds { paceSeconds = seconds }
+    }
+
     private func resolvedPoints() throws -> [Coordinate] {
         if textPending { return try RouteParser.parse(routeText) }
         return points
@@ -368,6 +576,27 @@ struct ContentView: View {
         }
     }
 
+    private func generateTrack() {
+        do {
+            let endpoints = try resolvedPoints()
+            guard endpoints.count == 2 else {
+                controller.status = "请先只保留长直边的两个端点，再生成跑道。"
+                return
+            }
+            let track = try TrackTemplate.generate(from: endpoints[0], to: endpoints[1],
+                                                   side: trackSide)
+            points = track.points
+            editorMode = 0
+            selectingSinglePoint = false
+            syncRouteText()
+            fitRevision += 1
+            controller.status = String(format: "已生成 %.1f 米环形跑道，宽约 %.0f 米。",
+                                       track.lengthMeters, track.widthMeters)
+        } catch {
+            controller.status = error.localizedDescription
+        }
+    }
+
     private func setPoint() {
         do {
             controller.setPoint(try RouteParser.coordinate(latitude: latitude, longitude: longitude))
@@ -378,6 +607,7 @@ struct ContentView: View {
 
     private func useSelectedAsPoint() {
         guard let selected = placeSearch.selected else { return }
+        placeSearch.rememberCurrentQuery()
         latitude = String(selected.coordinate.latitude)
         longitude = String(selected.coordinate.longitude)
         if controller.selectedDevice.isEmpty {
@@ -389,6 +619,7 @@ struct ContentView: View {
 
     private func addSelectedToRoute() {
         guard let selected = placeSearch.selected else { return }
+        placeSearch.rememberCurrentQuery()
         guard !textPending else {
             controller.status = "请先点击“应用到地图”，再加入搜索地点。"
             return
@@ -403,9 +634,12 @@ struct ContentView: View {
     }
 
     private func currentConfiguration() throws -> RouteConfiguration {
-        guard let speedValue = Double(speed), let jitterValue = Double(jitter),
+        guard let minutes = Int(paceMinutes), let seconds = Int(paceSeconds),
+              RunningPace.speed(minutes: minutes, seconds: seconds) != nil,
+              let speedValue = Double(speed), let jitterValue = Double(jitter),
               let passCount = Int(passes),
               let variationValue = Double(pathVariation) else { throw ConfigurationError.invalidSettings }
+        let plan = try dynamicSpeedPlan(baseSpeed: speedValue)
         return try RouteConfiguration(
             name: name,
             point: RouteParser.coordinate(latitude: latitude, longitude: longitude),
@@ -413,8 +647,33 @@ struct ContentView: View {
             speedMetersPerSecond: speedValue,
             jitterPercent: jitterValue,
             passes: passCount,
-            pathVariationMeters: variationValue
+            pathVariationMeters: variationValue,
+            dynamicSpeed: dynamicSpeed,
+            dynamicSpeedPlan: plan
         )
+    }
+
+    private func dynamicSpeedPlan(baseSpeed: Double) throws -> DynamicSpeedPlan {
+        if dynamicMode == .automatic {
+            return DynamicSpeedPlan(mode: .automatic, preset: dynamicPreset,
+                                    intervalKilometers: 0.8, lowPaceSeconds: 600,
+                                    recoverySeconds: 25)
+        }
+        guard let interval = Double(recoveryEveryKm),
+              let minutes = Int(lowPaceMinutes), let seconds = Int(lowPaceSeconds),
+              RunningPace.speed(minutes: minutes, seconds: seconds) != nil,
+              let duration = Double(recoverySeconds) else {
+            if dynamicSpeed { throw ConfigurationError.invalidDynamicSpeed }
+            return .standard
+        }
+        let plan = DynamicSpeedPlan(mode: .custom, preset: dynamicPreset,
+                                    intervalKilometers: interval,
+                                    lowPaceSeconds: minutes * 60 + seconds,
+                                    recoverySeconds: duration)
+        if dynamicSpeed && !plan.isValid(baseSpeed: baseSpeed) {
+            throw ConfigurationError.invalidDynamicSpeed
+        }
+        return plan
     }
 
     private func startRoute() {
@@ -428,7 +687,9 @@ struct ContentView: View {
             }
             controller.start(points: config.route, speed: config.speedMetersPerSecond,
                              jitter: config.jitterPercent, loops: config.passes,
-                             variationMeters: config.pathVariationMeters)
+                             variationMeters: config.pathVariationMeters,
+                             dynamicSpeed: config.dynamicSpeed,
+                             dynamicSpeedPlan: config.dynamicSpeedPlan)
         } catch {
             controller.status = error.localizedDescription
         }
@@ -466,9 +727,20 @@ struct ContentView: View {
             longitude = String(config.point.longitude)
             points = config.route
             speed = String(config.speedMetersPerSecond)
+            if let pace = RunningPace.components(speed: config.speedMetersPerSecond) {
+                paceMinutes = String(pace.minutes)
+                paceSeconds = String(pace.seconds)
+            }
             jitter = String(config.jitterPercent)
             passes = String(config.passes)
             pathVariation = String(config.pathVariationMeters)
+            dynamicSpeed = config.dynamicSpeed
+            dynamicMode = config.dynamicSpeedPlan.mode
+            dynamicPreset = config.dynamicSpeedPlan.preset
+            recoveryEveryKm = String(config.dynamicSpeedPlan.intervalKilometers)
+            lowPaceMinutes = String(config.dynamicSpeedPlan.lowPaceSeconds / 60)
+            lowPaceSeconds = String(config.dynamicSpeedPlan.lowPaceSeconds % 60)
+            recoverySeconds = String(config.dynamicSpeedPlan.recoverySeconds)
             syncRouteText()
             fitRevision += 1
             controller.status = "已导入配置：\(url.lastPathComponent)"

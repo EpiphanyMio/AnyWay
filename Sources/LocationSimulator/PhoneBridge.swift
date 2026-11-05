@@ -9,11 +9,14 @@ final class PhoneBridge: @unchecked Sendable {
     private var output: FileHandle?
     private var activeUDID: String?
 
+    private static var projectDirectory: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
     private static var supportDirectory: URL {
-        let projectDirectory = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         let candidates = [
             Bundle.main.resourceURL,
             Bundle.main.bundleURL.deletingLastPathComponent(),
@@ -36,9 +39,14 @@ final class PhoneBridge: @unchecked Sendable {
     }
 
     private static var bridgeURL: URL {
-        Bundle.main.url(forResource: "iphone_location_bridge", withExtension: "py")
-            ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let candidates = [
+            Bundle.main.url(forResource: "iphone_location_bridge", withExtension: "py"),
+            projectDirectory.appendingPathComponent("scripts/iphone_location_bridge.py"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                 .appendingPathComponent("scripts/iphone_location_bridge.py")
+        ].compactMap { $0 }
+        return candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) })
+            ?? projectDirectory.appendingPathComponent("scripts/iphone_location_bridge.py")
     }
 
     static func connectedDevices() throws -> [LocationDevice] {
@@ -88,9 +96,11 @@ final class PhoneBridge: @unchecked Sendable {
             try? send(["action": "clear"])
         }
         disconnect()
-        guard FileManager.default.isExecutableFile(atPath: Self.pythonURL.path),
-              FileManager.default.fileExists(atPath: Self.bridgeURL.path) else {
-            throw SimctlError.failed("缺少 iPhone 支持组件。请运行 scripts/install-iphone-support.sh 后重新构建应用。")
+        guard FileManager.default.isExecutableFile(atPath: Self.pythonURL.path) else {
+            throw SimctlError.failed("缺少 iPhone Python 支持组件。请运行 scripts/install-iphone-support.sh 后重新打开应用。")
+        }
+        guard FileManager.default.fileExists(atPath: Self.bridgeURL.path) else {
+            throw SimctlError.failed("缺少 iPhone 桥接脚本。请重新构建应用。")
         }
         let task = Process()
         task.executableURL = Self.pythonURL

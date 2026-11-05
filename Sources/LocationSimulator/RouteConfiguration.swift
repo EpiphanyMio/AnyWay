@@ -9,15 +9,18 @@ struct RouteConfiguration: Codable, Equatable {
     let jitterPercent: Double
     let passes: Int
     let pathVariationMeters: Double
+    let dynamicSpeed: Bool
+    let dynamicSpeedPlan: DynamicSpeedPlan
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, name, point, route, speedMetersPerSecond
-        case jitterPercent, passes, pathVariationMeters
+        case jitterPercent, passes, pathVariationMeters, dynamicSpeed, dynamicSpeedPlan
     }
 
     init(name: String, point: Coordinate, route: [Coordinate],
          speedMetersPerSecond: Double, jitterPercent: Double, passes: Int,
-         pathVariationMeters: Double = 2) throws {
+         pathVariationMeters: Double = 2, dynamicSpeed: Bool = false,
+         dynamicSpeedPlan: DynamicSpeedPlan = .standard) throws {
         self.schemaVersion = 1
         self.name = name
         self.point = point
@@ -26,6 +29,8 @@ struct RouteConfiguration: Codable, Equatable {
         self.jitterPercent = jitterPercent
         self.passes = passes
         self.pathVariationMeters = pathVariationMeters
+        self.dynamicSpeed = dynamicSpeed
+        self.dynamicSpeedPlan = dynamicSpeedPlan
         try validate()
     }
 
@@ -40,6 +45,9 @@ struct RouteConfiguration: Codable, Equatable {
         passes = try container.decode(Int.self, forKey: .passes)
         // Configurations created before path variation existed use a subtle 2 m drift.
         pathVariationMeters = try container.decodeIfPresent(Double.self, forKey: .pathVariationMeters) ?? 2
+        dynamicSpeed = try container.decodeIfPresent(Bool.self, forKey: .dynamicSpeed) ?? false
+        dynamicSpeedPlan = try container.decodeIfPresent(DynamicSpeedPlan.self,
+                                                         forKey: .dynamicSpeedPlan) ?? .standard
         try validate()
     }
 
@@ -57,6 +65,9 @@ struct RouteConfiguration: Codable, Equatable {
               pathVariationMeters.isFinite, (0...20).contains(pathVariationMeters) else {
             throw ConfigurationError.invalidSettings
         }
+        guard !dynamicSpeed || dynamicSpeedPlan.isValid(baseSpeed: speedMetersPerSecond) else {
+            throw ConfigurationError.invalidDynamicSpeed
+        }
     }
 }
 
@@ -65,13 +76,15 @@ enum ConfigurationError: LocalizedError {
     case invalidName
     case invalidRoute
     case invalidSettings
+    case invalidDynamicSpeed
 
     var errorDescription: String? {
         switch self {
         case .unsupportedVersion: "不支持此配置文件版本。"
         case .invalidName: "请填写配置名称。"
         case .invalidRoute: "配置路径最多支持 10000 个有效坐标点。"
-        case .invalidSettings: "速度须大于 0，抖动须为 0～100%，趟数须为 1～1000，路线偏移须为 0～20 米。"
+        case .invalidSettings: "速度须大于 0，配速秒数须为 0～59，抖动须为 0～100%，圈数须为 1～1000，路线偏移须为 0～20 米。"
+        case .invalidDynamicSpeed: "自定义动态速度需每隔 0.1～20 公里切换；低速配速须慢于跑步配速，持续时间须为 5～300 秒。"
         }
     }
 }

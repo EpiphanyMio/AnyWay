@@ -91,6 +91,13 @@ enum RouteParser {
     }
 }
 
+enum RouteLoop {
+    static func closed(_ points: [Coordinate]) -> [Coordinate] {
+        guard points.count >= 2, points.first != points.last else { return points }
+        return points + [points[0]]
+    }
+}
+
 struct RouteStepper: Sendable {
     let points: [Coordinate]
     let variationMeters: Double

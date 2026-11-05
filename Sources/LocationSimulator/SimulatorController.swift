@@ -150,28 +150,32 @@ final class SimulatorController: ObservableObject {
     }
 
     func start(points: [Coordinate], speed: Double, jitter: Double,
-               loops: Int, variationMeters: Double) {
+               loops: Int, variationMeters: Double, dynamicSpeed: Bool,
+               dynamicSpeedPlan: DynamicSpeedPlan) {
         guard !selectedDevice.isEmpty, !isRunning,
               points.count >= 2, speed.isFinite, speed > 0,
               jitter.isFinite, (0...100).contains(jitter), loops >= 1,
-              variationMeters.isFinite, (0...20).contains(variationMeters) else { return }
+              variationMeters.isFinite, (0...20).contains(variationMeters),
+              !dynamicSpeed || dynamicSpeedPlan.isValid(baseSpeed: speed) else { return }
         guard let device = devices.first(where: { $0.id == selectedDevice }) else { return }
         isRunning = true
         status = "开始路径模拟。"
         runningTask = Task {
             var speedOffset = 0.0
             let runSeed = UInt64.random(in: UInt64.min...UInt64.max)
+            var motion = MotionProfile(runningSpeed: speed, dynamicSpeed: dynamicSpeed,
+                                       seed: runSeed, plan: dynamicSpeedPlan)
+            let loopPoints = RouteLoop.closed(points)
             do {
+                try await send(loopPoints[0], to: device)
                 for pass in 0..<loops {
                     try Task.checkCancellation()
-                    let passPoints = pass.isMultiple(of: 2) ? points : Array(points.reversed())
                     let seed = runSeed &+ UInt64(pass)
-                    previewRoute = passPoints
+                    previewRoute = loopPoints
                     previewSeed = seed
-                    var stepper = RouteStepper(points: passPoints,
+                    var stepper = RouteStepper(points: loopPoints,
                                                variationMeters: variationMeters, seed: seed)
-                    try await send(passPoints[0], to: device)
-                    status = "正在运行第 \(pass + 1)/\(loops) 趟。"
+                    status = "正在运行第 \(pass + 1)/\(loops) 圈。"
                     var lastUpdate = ProcessInfo.processInfo.systemUptime
                     while !stepper.isFinished {
                         let wait = max(0, tickSeconds - (ProcessInfo.processInfo.systemUptime - lastUpdate))
@@ -183,8 +187,15 @@ final class SimulatorController: ObservableObject {
                         lastUpdate = now
                         let target = Double.random(in: -jitter / 100...jitter / 100)
                         speedOffset = 0.8 * speedOffset + 0.2 * target
-                        let next = stepper.advance(meters: speed * (1 + speedOffset) * elapsed)
+                        let distance = motion.advance(seconds: elapsed,
+                                                      speedMultiplier: 1 + speedOffset)
+                        let next = stepper.advance(meters: distance)
                         try await send(next, to: device)
+                        if dynamicSpeed {
+                            let segment = motion.isRecovering
+                                ? (dynamicSpeedPlan.mode == .custom ? " · 低速段" : " · 慢走休息") : ""
+                            status = "正在运行第 \(pass + 1)/\(loops) 圈\(segment)。"
+                        }
                     }
                 }
                 status = "路径模拟完成。定位停留在最后一个点；可点击“清除定位”。"

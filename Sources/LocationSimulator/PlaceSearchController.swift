@@ -5,16 +5,26 @@ import MapKit
 enum SchoolSearchRules {
     private static let schoolTerms = ["学校", "大学", "学院", "中学", "小学", "幼儿园", "校园",
                                       "school", "university", "college", "campus"]
-    private static let groundTerms = ["运动场", "操场", "体育场", "田径场", "体育中心", "体育馆",
-                                      "stadium", "athletic", "sports field", "playground", "running track"]
+    private static let groundTerms = ["运动场", "操场", "体育场", "田径场", "体育中心", "体育馆", "跑道",
+                                      "篮球场", "足球场", "网球场", "羽毛球场", "排球场", "乒乓球场",
+                                      "球场", "球馆", "游泳馆", "游泳池", "游泳", "健身房", "健身中心",
+                                      "健身", "滑冰场", "体育公园",
+                                      "stadium", "athletic", "sports field", "sports center",
+                                      "sports hall", "playground", "running track",
+                                      "basketball", "soccer", "football field", "tennis", "badminton",
+                                      "volleyball", "swimming", "fitness", "gym"]
 
-    static func isSportsGround(name: String) -> Bool {
+    static func isSportsGround(name: String, category: String? = nil) -> Bool {
         let lowercased = name.lowercased()
         return groundTerms.contains { lowercased.contains($0) }
+            || category.map { value in
+                let category = value.lowercased()
+                return category.contains("sports") || groundTerms.contains { category.contains($0) }
+            } == true
     }
 
     static func isSchool(name: String, category: String? = nil) -> Bool {
-        if isSportsGround(name: name) { return false }
+        if isSportsGround(name: name, category: category) { return false }
         if let category {
             let lowercasedCategory = category.lowercased()
             if lowercasedCategory.contains("school") || lowercasedCategory.contains("university") {
@@ -81,8 +91,7 @@ struct PlaceResult: Identifiable {
         self.subtitle = mapItem.placemark.title ?? ""
         self.coordinate = coordinate
         let category = mapItem.pointOfInterestCategory?.rawValue
-        self.isSportsGround = SchoolSearchRules.isSportsGround(name: name)
-            || category?.lowercased().contains("stadium") == true
+        self.isSportsGround = SchoolSearchRules.isSportsGround(name: name, category: category)
         self.isSchool = SchoolSearchRules.isSchool(
             name: name,
             category: category
@@ -98,11 +107,24 @@ final class PlaceSearchController: ObservableObject {
     @Published private(set) var message = "可搜索地点或学校名称。"
     @Published private(set) var isSearching = false
     @Published private(set) var focusRevision = 0
+    @Published private(set) var history: [String]
 
+    private let defaults: UserDefaults
+    private static let historyKey = "placeSearchHistory.v1"
     private var requestNumber = 0
     private var typingTask: Task<Void, Never>?
+    private var suppressNextQueryChange = false
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        history = SearchHistory(entries: defaults.stringArray(forKey: Self.historyKey) ?? []).entries
+    }
 
     func queryChanged() {
+        if suppressNextQueryChange {
+            suppressNextQueryChange = false
+            return
+        }
         requestNumber += 1
         typingTask?.cancel()
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -116,17 +138,18 @@ final class PlaceSearchController: ObservableObject {
         typingTask = Task {
             try? await Task.sleep(nanoseconds: 450_000_000)
             guard !Task.isCancelled else { return }
-            search()
+            search(recordHistory: false)
         }
     }
 
-    func search() {
+    func search(recordHistory: Bool = true) {
         typingTask?.cancel()
         let searchText = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !searchText.isEmpty else {
             message = "请输入地点或学校名称。"
             return
         }
+        if recordHistory { remember(searchText) }
         requestNumber += 1
         let request = requestNumber
         isSearching = true
@@ -170,6 +193,7 @@ final class PlaceSearchController: ObservableObject {
     }
 
     func select(_ result: PlaceResult) {
+        remember(query)
         selectWithoutRefinement(result)
         guard result.isSchool else {
             message = "已选择“\(result.name)”。"
@@ -181,6 +205,26 @@ final class PlaceSearchController: ObservableObject {
         Task { await searchGrounds(near: result, request: request) }
     }
 
+    func searchHistoryItem(_ item: String) {
+        if query != item { suppressNextQueryChange = true }
+        query = item
+        search()
+    }
+
+    func rememberCurrentQuery() { remember(query) }
+
+    func clearHistory() {
+        history = []
+        defaults.removeObject(forKey: Self.historyKey)
+    }
+
+    private func remember(_ text: String) {
+        var updated = SearchHistory(entries: history)
+        updated.record(text)
+        history = updated.entries
+        defaults.set(history, forKey: Self.historyKey)
+    }
+
     private func selectWithoutRefinement(_ result: PlaceResult) {
         selected = result
         focusRevision += 1
@@ -188,7 +232,7 @@ final class PlaceSearchController: ObservableObject {
 
     private func searchGrounds(near school: PlaceResult, request: Int) async {
         selectWithoutRefinement(school)
-        message = "已识别为学校，正在搜索附近的“运动场”…"
+        message = "已识别为学校，正在搜索附近的运动场地…"
         let latitude = school.coordinate.latitude
         let longitude = school.coordinate.longitude
         let longitudeSpan = min(1, 0.05 / max(0.2, cos(latitude * .pi / 180)))
@@ -196,34 +240,51 @@ final class PlaceSearchController: ObservableObject {
             center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
             span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: longitudeSpan)
         )
-        do {
-            var items = try await searchItems(query: SchoolSearchRules.sportsQuery(for: school.name),
-                                              region: region)
-            guard request == requestNumber else { return }
-            var grounds = nearbyGrounds(items, school: school)
-            if grounds.isEmpty {
-                items = try await searchItems(query: "运动场", region: region)
-                grounds = nearbyGrounds(items, school: school)
-            }
-            guard request == requestNumber else { return }
-            results = [school] + Array(grounds.prefix(7))
-            isSearching = false
-            message = grounds.isEmpty
-                ? "已识别为学校，附近没有找到标记为“运动场”的地点。"
-                : "已识别为学校，附近找到 \(grounds.count) 处运动场。"
-        } catch {
-            guard request == requestNumber else { return }
-            results = [school]
-            isSearching = false
-            message = "已识别为学校，但运动场搜索失败：\(error.localizedDescription)"
-        }
+        async let schoolTracks = searchItems(query: SchoolSearchRules.sportsQuery(for: school.name), region: region)
+        async let tracks = searchItems(query: "运动场", region: region)
+        async let basketball = searchItems(query: "篮球场", region: region)
+        async let playground = searchItems(query: "操场", region: region)
+        async let football = searchItems(query: "足球场", region: region)
+        async let tennis = searchItems(query: "网球场", region: region)
+        async let indoor = searchItems(query: "体育馆", region: region)
+        async let swimming = searchItems(query: "游泳馆", region: region)
+        async let badminton = searchItems(query: "羽毛球场", region: region)
+        async let fitness = searchItems(query: "健身中心", region: region)
+        var items: [MKMapItem] = []
+        items += (try? await schoolTracks) ?? []
+        items += (try? await tracks) ?? []
+        items += (try? await basketball) ?? []
+        items += (try? await playground) ?? []
+        items += (try? await football) ?? []
+        items += (try? await tennis) ?? []
+        items += (try? await indoor) ?? []
+        items += (try? await swimming) ?? []
+        items += (try? await badminton) ?? []
+        items += (try? await fitness) ?? []
+        guard request == requestNumber else { return }
+        let grounds = nearbyGrounds(items, school: school)
+        results = [school] + grounds
+        isSearching = false
+        message = grounds.isEmpty
+            ? "已识别为学校，附近没有找到运动场地。"
+            : "已识别为学校，附近找到 \(grounds.count) 处运动场地。"
     }
 
     private func nearbyGrounds(_ items: [MKMapItem], school: PlaceResult) -> [PlaceResult] {
-        items.compactMap(PlaceResult.init(mapItem:)).filter { result in
+        let nearby = items.compactMap(PlaceResult.init(mapItem:)).filter { result in
             result.isSportsGround
                 && result.coordinate.distance(to: school.coordinate) <= 3_000
         }
+        .sorted { $0.coordinate.distance(to: school.coordinate) < $1.coordinate.distance(to: school.coordinate) }
+        var unique: [PlaceResult] = []
+        for result in nearby {
+            if unique.contains(where: {
+                $0.name.caseInsensitiveCompare(result.name) == .orderedSame
+                    && $0.coordinate.distance(to: result.coordinate) < 80
+            }) { continue }
+            unique.append(result)
+        }
+        return unique
     }
 
     private func searchItems(query: String, region: MKCoordinateRegion? = nil) async throws -> [MKMapItem] {

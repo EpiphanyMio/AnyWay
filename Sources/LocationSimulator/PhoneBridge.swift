@@ -11,6 +11,12 @@ final class PhoneBridge: @unchecked Sendable {
 
     private static var supportDirectory: URL {
         if Bundle.main.bundleURL.pathExtension == "app" {
+            if let resources = Bundle.main.resourceURL,
+               FileManager.default.isExecutableFile(
+                   atPath: resources.appendingPathComponent("iphone-venv/bin/python").path
+               ) {
+                return resources
+            }
             return Bundle.main.bundleURL.deletingLastPathComponent()
         }
         return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)

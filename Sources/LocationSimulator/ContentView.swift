@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var passes = "2"
     @State private var pathVariation = "2"
     @State private var editorMode = 0
+    @State private var selectingSinglePoint = false
 
     private let accent = Color.teal
 
@@ -80,8 +81,9 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("路线画布").font(.headline)
-                    Text("单击添加路径点；曲线显示当前模拟轨迹")
+                    Text("地图画布").font(.headline)
+                    Text(selectingSinglePoint ? "单击地图选择单点定位；拖动可移动地图"
+                         : "单击添加路径点；曲线显示当前模拟轨迹")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -100,8 +102,15 @@ struct ContentView: View {
                          fitRevision: fitRevision,
                          searchCoordinate: placeSearch.selected?.coordinate,
                          searchTitle: placeSearch.selected?.name ?? "",
-                         focusRevision: placeSearch.focusRevision) { point in
+                         focusRevision: placeSearch.focusRevision,
+                         singlePoint: try? RouteParser.coordinate(latitude: latitude, longitude: longitude)) { point in
                 guard !controller.isRunning else { return }
+                if selectingSinglePoint {
+                    latitude = String(point.latitude)
+                    longitude = String(point.longitude)
+                    controller.status = "已在地图上选择单点。点击“设置定位”应用到设备。"
+                    return
+                }
                 guard !textPending else {
                     controller.status = "请先点击“应用到地图”，再继续在地图上添加点。"
                     return
@@ -153,6 +162,7 @@ struct ContentView: View {
                 TextField("搜索地点或学校，例如：北京大学", text: $placeSearch.query)
                     .textFieldStyle(.plain)
                     .onSubmit { placeSearch.search() }
+                    .onChange(of: placeSearch.query) { _ in placeSearch.queryChanged() }
                 if placeSearch.isSearching {
                     ProgressView().controlSize(.small)
                 }
@@ -214,23 +224,30 @@ struct ContentView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                card("模拟设备", icon: "iphone.gen3") {
+                card("目标设备", icon: "iphone.gen3") {
                     HStack(spacing: 8) {
                         Picker("", selection: $controller.selectedDevice) {
-                            if controller.devices.isEmpty { Text("没有已启动的模拟器").tag("") }
+                            if controller.devices.isEmpty { Text("没有可用设备").tag("") }
                             ForEach(controller.devices) { device in
-                                Text(device.name).tag(device.udid)
+                                Text(device.name).tag(device.id)
                             }
                         }
                         .labelsHidden()
                         Button { controller.refresh() } label: {
                             Image(systemName: "arrow.clockwise")
                         }
-                        .help("刷新已启动的模拟器")
+                        .help("刷新模拟器与已连接的 iPhone")
                     }
                 }
 
                 card("单点定位", icon: "mappin.circle") {
+                    Button(selectingSinglePoint ? "退出地图选点" : "在地图上选点") {
+                        selectingSinglePoint.toggle()
+                    }
+                    .disabled(controller.isRunning)
+                    Text(selectingSinglePoint ? "在左侧地图单击目标位置，坐标会自动填入下方。"
+                         : "可以输入坐标、搜索地点，或在地图上选点。")
+                        .font(.caption).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
                         field("纬度", text: $latitude)
                         field("经度", text: $longitude)

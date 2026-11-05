@@ -4,6 +4,7 @@ import SwiftUI
 
 final class RoutePointAnnotation: MKPointAnnotation {}
 final class SearchPointAnnotation: MKPointAnnotation {}
+final class SinglePointAnnotation: MKPointAnnotation {}
 
 struct RouteMapView: NSViewRepresentable {
     let points: [Coordinate]
@@ -14,7 +15,8 @@ struct RouteMapView: NSViewRepresentable {
     let searchCoordinate: Coordinate?
     let searchTitle: String
     let focusRevision: Int
-    let onAddPoint: (Coordinate) -> Void
+    let singlePoint: Coordinate?
+    let onMapClick: (Coordinate) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -27,11 +29,13 @@ struct RouteMapView: NSViewRepresentable {
         map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 39.9042, longitude: 116.4074),
                                          span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)),
                       animated: false)
-        let click = NSClickGestureRecognizer(target: context.coordinator,
-                                             action: #selector(Coordinator.handleClick(_:)))
-        map.addGestureRecognizer(click)
         context.coordinator.mapView = map
+        context.coordinator.startTrackingClicks()
         return map
+    }
+
+    static func dismantleNSView(_ map: MKMapView, coordinator: Coordinator) {
+        coordinator.stopTrackingClicks()
     }
 
     func updateNSView(_ map: MKMapView, context: Context) {
@@ -60,6 +64,17 @@ struct RouteMapView: NSViewRepresentable {
                 annotation.title = searchTitle
                 map.addAnnotation(annotation)
                 coordinator.searchAnnotation = annotation
+            }
+        }
+        if coordinator.renderedSinglePoint != singlePoint {
+            coordinator.renderedSinglePoint = singlePoint
+            map.removeAnnotations(map.annotations.filter { $0 is SinglePointAnnotation })
+            if let singlePoint {
+                let annotation = SinglePointAnnotation()
+                annotation.coordinate = CLLocationCoordinate2D(latitude: singlePoint.latitude,
+                                                               longitude: singlePoint.longitude)
+                annotation.title = "单点定位"
+                map.addAnnotation(annotation)
             }
         }
         let routeToPreview = previewRoute.isEmpty ? points : previewRoute
@@ -119,22 +134,68 @@ struct RouteMapView: NSViewRepresentable {
         var renderedSearchCoordinate: Coordinate?
         var renderedSearchTitle = ""
         var searchAnnotation: SearchPointAnnotation?
+        var renderedSinglePoint: Coordinate?
         var lastFocusRevision = -1
+        private var clickMonitor: Any?
+        private var mouseDownLocation: NSPoint?
 
         init(_ parent: RouteMapView) { self.parent = parent }
 
-        @objc func handleClick(_ gesture: NSClickGestureRecognizer) {
-            guard let map = mapView else { return }
-            let location = gesture.location(in: map)
+        func startTrackingClicks() {
+            guard clickMonitor == nil else { return }
+            // Observe the complete mouse sequence without competing with MapKit's pan gesture.
+            clickMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+            ) { [weak self] event in
+                self?.handleMouseEvent(event)
+                return event
+            }
+        }
+
+        func stopTrackingClicks() {
+            if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+            clickMonitor = nil
+            mouseDownLocation = nil
+        }
+
+        private func handleMouseEvent(_ event: NSEvent) {
+            guard let map = mapView, event.window === map.window else {
+                mouseDownLocation = nil
+                return
+            }
+            let location = map.convert(event.locationInWindow, from: nil)
+            switch event.type {
+            case .leftMouseDown:
+                mouseDownLocation = map.bounds.contains(location) && event.clickCount == 1
+                    ? location : nil
+            case .leftMouseDragged:
+                if let down = mouseDownLocation,
+                   hypot(location.x - down.x, location.y - down.y) > 5 {
+                    mouseDownLocation = nil
+                }
+            case .leftMouseUp:
+                guard let down = mouseDownLocation else { return }
+                mouseDownLocation = nil
+                guard map.bounds.contains(location),
+                      hypot(location.x - down.x, location.y - down.y) <= 5 else { return }
+                addPoint(at: location, on: map)
+            default:
+                break
+            }
+        }
+
+        private func addPoint(at location: NSPoint, on map: MKMapView) {
             var hitView = map.hitTest(location)
             while let view = hitView {
-                if view is MKAnnotationView { return }
+                if view is MKAnnotationView || view is NSControl { return }
                 hitView = view.superview
             }
             let coordinate = map.convert(location, toCoordinateFrom: map)
             guard let point = try? Coordinate(latitude: coordinate.latitude, longitude: coordinate.longitude) else { return }
-            parent.onAddPoint(point)
+            parent.onMapClick(point)
         }
+
+        deinit { stopTrackingClicks() }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let line = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
@@ -147,15 +208,17 @@ struct RouteMapView: NSViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-            guard annotation is RoutePointAnnotation || annotation is SearchPointAnnotation else { return nil }
+            guard annotation is RoutePointAnnotation || annotation is SearchPointAnnotation
+                    || annotation is SinglePointAnnotation else { return nil }
             let isSearch = annotation is SearchPointAnnotation
-            let identifier = isSearch ? "SearchPoint" : "RoutePoint"
+            let isSinglePoint = annotation is SinglePointAnnotation
+            let identifier = isSearch ? "SearchPoint" : (isSinglePoint ? "SinglePoint" : "RoutePoint")
             let view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
                 ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
             view.annotation = annotation
-            view.markerTintColor = isSearch ? .systemOrange : .systemTeal
-            view.glyphText = isSearch ? "⌕" : (annotation.title ?? "•")
-            view.canShowCallout = isSearch
+            view.markerTintColor = isSearch ? .systemOrange : (isSinglePoint ? .systemPurple : .systemTeal)
+            view.glyphText = isSearch ? "⌕" : (isSinglePoint ? "◎" : (annotation.title ?? "•"))
+            view.canShowCallout = isSearch || isSinglePoint
             return view
         }
     }

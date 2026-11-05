@@ -91,5 +91,13 @@ final class RouteTests: XCTestCase {
         XCTAssertFalse(SchoolSearchRules.isSchool(name: "北京大学运动场", category: "school"))
         XCTAssertTrue(SchoolSearchRules.isSportsGround(name: "北京大学运动场"))
         XCTAssertEqual(SchoolSearchRules.sportsQuery(for: "北京大学"), "北京大学 运动场")
+        XCTAssertEqual(SchoolSearchRules.expandedQuery("浙大"), "浙江大学")
+        XCTAssertEqual(SchoolSearchRules.expandedQuery("北邮沙河校区"), "北京邮电大学沙河校区")
+        XCTAssertEqual(SchoolSearchRules.expandedQuery("上海大学"), "上海大学")
+        let campus = PlaceResult.knownCampus(matching: "北京邮电大学沙河校区")
+        XCTAssertEqual(campus?.name, "北京邮电大学（沙河校区）")
+        XCTAssertEqual(campus?.coordinate.latitude, 40.15608)
+        XCTAssertNotNil(PlaceResult.knownCampus(matching: "北邮沙河校区"))
+        XCTAssertNil(PlaceResult.knownCampus(matching: "北京邮电大学"))
     }
 }

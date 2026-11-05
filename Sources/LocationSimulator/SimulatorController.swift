@@ -13,6 +13,14 @@ private struct DeviceList: Decodable {
     let devices: [String: [SimulatorDevice]]
 }
 
+struct LocationDevice: Identifiable, Sendable {
+    enum Kind: Sendable { case simulator, iphone }
+    let name: String
+    let udid: String
+    let kind: Kind
+    var id: String { "\(kind == .simulator ? "sim" : "iphone"):\(udid)" }
+}
+
 enum SimctlError: LocalizedError {
     case failed(String)
 
@@ -64,9 +72,32 @@ enum Simctl {
     }
 }
 
+enum DeviceBackend {
+    static func availableDevices() throws -> [LocationDevice] {
+        let simulators = ((try? Simctl.bootedDevices()) ?? []).map {
+            LocationDevice(name: "\($0.name) · 模拟器", udid: $0.udid, kind: .simulator)
+        }
+        return simulators + (try PhoneBridge.connectedDevices())
+    }
+
+    static func set(_ coordinate: Coordinate, device: LocationDevice) throws {
+        switch device.kind {
+        case .simulator: try Simctl.set(coordinate, device: device.udid)
+        case .iphone: try PhoneBridge.shared.set(coordinate, udid: device.udid)
+        }
+    }
+
+    static func clear(device: LocationDevice) throws {
+        switch device.kind {
+        case .simulator: try Simctl.clear(device: device.udid)
+        case .iphone: try PhoneBridge.shared.clear(udid: device.udid)
+        }
+    }
+}
+
 @MainActor
 final class SimulatorController: ObservableObject {
-    @Published var devices: [SimulatorDevice] = []
+    @Published var devices: [LocationDevice] = []
     @Published var selectedDevice = ""
     @Published var status = "请先启动 iOS 模拟器，然后刷新设备。"
     @Published private(set) var isRunning = false
@@ -79,12 +110,12 @@ final class SimulatorController: ObservableObject {
     func refresh() {
         Task {
             do {
-                let found = try await Task.detached { try Simctl.bootedDevices() }.value
+                let found = try await Task.detached { try DeviceBackend.availableDevices() }.value
                 devices = found
-                if !found.contains(where: { $0.udid == selectedDevice }) {
-                    selectedDevice = found.first?.udid ?? ""
+                if !found.contains(where: { $0.id == selectedDevice }) {
+                    selectedDevice = found.first?.id ?? ""
                 }
-                status = found.isEmpty ? "没有已启动的模拟器。请在 Xcode 中启动一个 iOS 模拟器。" : "找到 \(found.count) 台已启动的模拟器。"
+                status = found.isEmpty ? "未找到设备。请启动模拟器，或连接并信任已开启开发者模式的 iPhone。" : "找到 \(found.count) 台可用设备。"
             } catch {
                 status = error.localizedDescription
             }
@@ -93,10 +124,11 @@ final class SimulatorController: ObservableObject {
 
     func setPoint(_ coordinate: Coordinate) {
         guard !selectedDevice.isEmpty, !isRunning else { return }
-        let device = selectedDevice
+        guard let device = devices.first(where: { $0.id == selectedDevice }) else { return }
+        if device.kind == .iphone { status = "正在连接 iPhone 开发者定位服务…" }
         Task {
             do {
-                try await Task.detached { try Simctl.set(coordinate, device: device) }.value
+                try await Task.detached { try DeviceBackend.set(coordinate, device: device) }.value
                 status = "已设置定位：\(coordinate.simctlArgument)"
             } catch {
                 status = error.localizedDescription
@@ -106,10 +138,10 @@ final class SimulatorController: ObservableObject {
 
     func clear() {
         guard !selectedDevice.isEmpty, !isRunning else { return }
-        let device = selectedDevice
+        guard let device = devices.first(where: { $0.id == selectedDevice }) else { return }
         Task {
             do {
-                try await Task.detached { try Simctl.clear(device: device) }.value
+                try await Task.detached { try DeviceBackend.clear(device: device) }.value
                 status = "已清除模拟定位。"
             } catch {
                 status = error.localizedDescription
@@ -123,7 +155,7 @@ final class SimulatorController: ObservableObject {
               points.count >= 2, speed.isFinite, speed > 0,
               jitter.isFinite, (0...100).contains(jitter), loops >= 1,
               variationMeters.isFinite, (0...20).contains(variationMeters) else { return }
-        let device = selectedDevice
+        guard let device = devices.first(where: { $0.id == selectedDevice }) else { return }
         isRunning = true
         status = "开始路径模拟。"
         runningTask = Task {
@@ -173,9 +205,9 @@ final class SimulatorController: ObservableObject {
         runningTask?.cancel()
     }
 
-    private func send(_ coordinate: Coordinate, to device: String) async throws {
+    private func send(_ coordinate: Coordinate, to device: LocationDevice) async throws {
         try Task.checkCancellation()
-        try await Task.detached { try Simctl.set(coordinate, device: device) }.value
+        try await Task.detached { try DeviceBackend.set(coordinate, device: device) }.value
         try Task.checkCancellation()
     }
 }

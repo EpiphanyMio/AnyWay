@@ -31,6 +31,16 @@ enum SchoolSearchRules {
     static func sportsQuery(for schoolName: String) -> String {
         "\(schoolName) 运动场"
     }
+
+    static func expandedQuery(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        for (abbreviation, fullName) in [("浙大", "浙江大学"), ("北邮", "北京邮电大学")] {
+            if trimmed.hasPrefix(abbreviation) {
+                return fullName + trimmed.dropFirst(abbreviation.count)
+            }
+        }
+        return trimmed
+    }
 }
 
 struct PlaceResult: Identifiable {
@@ -40,6 +50,28 @@ struct PlaceResult: Identifiable {
     let coordinate: Coordinate
     let isSchool: Bool
     let isSportsGround: Bool
+
+    private init(name: String, subtitle: String, coordinate: Coordinate, isSchool: Bool) {
+        self.name = name
+        self.subtitle = subtitle
+        self.coordinate = coordinate
+        self.isSchool = isSchool
+        self.isSportsGround = false
+    }
+
+    static func knownCampus(matching query: String) -> PlaceResult? {
+        let normalized = SchoolSearchRules.expandedQuery(query)
+            .filter { !$0.isWhitespace && !"（）()·-".contains($0) }
+        guard normalized == "北京邮电大学沙河校区" else { return nil }
+        // WGS-84 campus position from OpenStreetMap way 685054417.
+        // https://www.openstreetmap.org/way/685054417
+        guard let coordinate = try? Coordinate(latitude: 40.15608, longitude: 116.28333) else {
+            return nil
+        }
+        return PlaceResult(name: "北京邮电大学（沙河校区）",
+                           subtitle: "北京市昌平区南丰路1号 · OpenStreetMap",
+                           coordinate: coordinate, isSchool: true)
+    }
 
     init?(mapItem: MKMapItem) {
         guard let coordinate = try? Coordinate(latitude: mapItem.placemark.coordinate.latitude,
@@ -68,8 +100,28 @@ final class PlaceSearchController: ObservableObject {
     @Published private(set) var focusRevision = 0
 
     private var requestNumber = 0
+    private var typingTask: Task<Void, Never>?
+
+    func queryChanged() {
+        requestNumber += 1
+        typingTask?.cancel()
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            results = []
+            selected = nil
+            isSearching = false
+            message = "可搜索地点或学校名称。"
+            return
+        }
+        typingTask = Task {
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            search()
+        }
+    }
 
     func search() {
+        typingTask?.cancel()
         let searchText = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !searchText.isEmpty else {
             message = "请输入地点或学校名称。"
@@ -83,7 +135,13 @@ final class PlaceSearchController: ObservableObject {
         message = "正在搜索“\(searchText)”…"
         Task {
             do {
-                let items = try await searchItems(query: searchText)
+                if let campus = PlaceResult.knownCampus(matching: searchText) {
+                    results = [campus]
+                    await searchGrounds(near: campus, request: request)
+                    return
+                }
+                let expanded = SchoolSearchRules.expandedQuery(searchText)
+                let items = try await searchItems(query: expanded)
                 guard request == requestNumber else { return }
                 let found = items.compactMap(PlaceResult.init(mapItem:))
                 guard !found.isEmpty else {
@@ -91,10 +149,11 @@ final class PlaceSearchController: ObservableObject {
                     message = "没有找到匹配地点。"
                     return
                 }
-                let containsSchoolTerm = SchoolSearchRules.isSchool(name: searchText)
+                let containsSchoolTerm = SchoolSearchRules.isSchool(name: expanded)
                 let school = (containsSchoolTerm ? found.first(where: { $0.isSchool }) : nil)
                     ?? (found.first?.isSchool == true ? found.first : nil)
                 if !SchoolSearchRules.isSportsGround(name: searchText), let school {
+                    results = [school]
                     await searchGrounds(near: school, request: request)
                 } else {
                     results = Array(found.prefix(8))

@@ -1,16 +1,26 @@
 # 定位模拟器
 
-一个在 **Mac 上运行**的 SwiftUI 工具，通过 Xcode 自带的 `xcrun simctl location` 修改 **iOS 模拟器** 的定位。支持地点搜索、地图绘制、单点定位、弯曲路径模拟、速度随机抖动、逐趟路径误差，以及 JSON 配置文件的保存与导入。
+一个在 **Mac 上运行**的 SwiftUI 工具，可修改 **iOS 模拟器** 及已连接的 **实体 iPhone（iOS 17 或更新版本）** 的开发者模拟定位。支持地点搜索、地图绘制、单点定位、弯曲路径模拟、速度随机抖动、逐趟路径误差，以及 JSON 配置文件的保存与导入。
 
 ## Xcode 26.3 中运行
 
 1. 安装 Xcode 26.3，并在 Xcode 的 **Settings → Platforms** 安装所需的 iOS Simulator runtime。首次启动 Xcode 时完成组件安装。
 2. 用 Xcode 打开本目录的 `Package.swift`，选择 **LocationSimulator** scheme，运行目标选 **My Mac**，按 **⌘R**。
 3. 在 Xcode 中启动一个 iOS 模拟器（**Window → Devices and Simulators**，或先运行任意 iOS 项目）。回到定位模拟器，点击“刷新”。
-4. 选中设备后输入坐标并点击“设置定位”；或在左侧地图上依次单击至少两个点绘制路线，设置参数后点击“开始模拟”。也可以切到“坐标文本”，每行输入一个 `纬度,经度` 并点击“应用到地图”。模拟器内的地图或使用 Core Location 的 App 会收到模拟坐标。
+4. 选中设备后，在“单点定位”中点击“在地图上选点”，再单击左侧地图选择位置；坐标会自动填入，点击“设置定位”即可生效。也可直接输入坐标，或搜索地点后点击“设为单点”。路径绘制时退出地图选点，在地图上依次单击至少两个点，设置参数后点击“开始模拟”。也可以切到“坐标文本”，每行输入一个 `纬度,经度` 并点击“应用到地图”。
 5. “停止”会保留当前坐标；“清除定位”会让模拟器恢复默认定位行为。
 
+## 连接实体 iPhone
+
+1. 用数据线将 iPhone 连接到 Mac，在手机上解锁并选择“信任此电脑”。在 iPhone 的“设置 → 隐私与安全性”中开启“开发者模式”，按系统提示重启并确认。
+2. 在 Xcode 的“Window → Devices and Simulators”中确认设备已完成配对和开发者组件准备。实体设备定位通过 [pymobiledevice3 的 DVT 定位服务](https://github.com/doronz88/pymobiledevice3/blob/master/docs/guides/cli-recipes.md#dvt-examples) 实现。
+3. 运行 `bash scripts/install-iphone-support.sh` 安装项目内的 iPhone 支持组件，再用 `bash scripts/build-app.sh` 构建应用。应用内点击“刷新”，选择“iOS 设备”，即可使用单点、路径和清除定位。
+
+设备需要保持连接，退出应用会结束开发者定位会话。定位服务受 iOS 版本与开发者模式限制；若设备连接失败，应用会显示具体错误。
+
 地图上方可以搜索地点或学校。若搜索结果识别为学校，工具会自动以“学校名 运动场”搜索该校附近的运动场；没有匹配时再尝试附近的“运动场”。点击结果可将地图移至该地点，并可选择“设为单点”或“加入路线”。运动场结果取决于 Apple 地图的数据覆盖范围和网络连接。
+
+搜索支持“浙大”“北邮”等简称。Apple 地图尚未返回北京邮电大学沙河校区时，工具使用 [OpenStreetMap 的校区位置](https://www.openstreetmap.org/way/685054417) 显示结果；地点详情中会注明来源。
 
 右上角的“保存配置”会保存方案名称、单点坐标、路径点、速度、抖动、趟数和路线偏移上限为 `.json` 文件；“导入配置”会校验文件并在地图上恢复路线。旧版 JSON 缺少偏移参数时默认使用 2 米。模拟器设备不写入配置，因为其设备 ID 会随安装环境变化。文本坐标有未应用的修改时，请先应用到地图，再继续点击地图绘制。
 
@@ -18,10 +28,15 @@
 
 ## 限制
 
-- 本工具仅控制 **已启动的 iOS 模拟器**，需要在 Mac 上运行；不能作为 iOS App 在模拟器内部修改系统定位。
-- Apple 的公开 iOS API 不允许普通 App 修改实体 iPhone 的系统级定位。Xcode 调试会话可以给被调试 App 提供 GPX 模拟定位，但这不是面向所有 App 的系统级定位修改。因此没有提供声称能全局修改实体 iPhone 定位的功能。
+- 本工具需要在 Mac 上运行；实体 iPhone 功能依赖开发者模式、已信任连接和 iOS 开发者服务，不是 iPhone 上普通 App 的公开定位修改 API。
+- 实体设备的兼容性会随 iOS 更新变化。已在通过 USB 连接的 iPhone 17 Pro（iOS 27.3 beta）上验证设备识别、设置定位和清除定位；路径模拟已在应用中启动并向设备发送起点。
 - 仅用于开发和测试，请遵守所测试服务的使用条款。
 
-## 测试
+## 命令行构建与运行
+
+运行 `bash scripts/build-app.sh` 生成 `.build/LocationSimulator.app`，然后运行
+`open .build/LocationSimulator.app`。使用应用包启动可正常注册 macOS 窗口和键盘焦点。
+
+## 单元测试
 
 在 Xcode 中选择 **Product → Test**，或在 Mac 终端运行 `swift test`。

@@ -12,6 +12,10 @@ mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
 cp "$bin_dir/LocationSimulator" "$app_dir/Contents/MacOS/LocationSimulator"
 cp scripts/iphone_location_bridge.py "$app_dir/Contents/Resources/iphone_location_bridge.py"
+if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+    cp android/app/build/outputs/apk/debug/app-debug.apk \
+        "$app_dir/Contents/Resources/LocationSimulator-Android.apk"
+fi
 bundled_venv="$app_dir/Contents/Resources/iphone-venv"
 rm -rf "$bundled_venv"
 if [ -x .build/iphone-venv/bin/python ]; then
@@ -50,3 +54,4 @@ cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 PLIST
 codesign --force --sign - "$app_dir"
 printf 'Built: %s\n' "$app_dir"
+

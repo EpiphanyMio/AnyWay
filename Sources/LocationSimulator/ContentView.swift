@@ -329,7 +329,7 @@ struct ContentView: View {
                         Button { controller.refresh() } label: {
                             Image(systemName: "arrow.clockwise")
                         }
-                        .help("刷新模拟器与已连接的 iPhone")
+                        .help("刷新模拟器、iPhone 与 Android 设备")
                     }
                 }
 
@@ -749,3 +749,4 @@ struct ContentView: View {
         }
     }
 }
+

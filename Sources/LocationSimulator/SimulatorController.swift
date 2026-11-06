@@ -14,11 +14,19 @@ private struct DeviceList: Decodable {
 }
 
 struct LocationDevice: Identifiable, Sendable {
-    enum Kind: Sendable { case simulator, iphone }
+    enum Kind: Sendable { case simulator, iphone, android }
     let name: String
     let udid: String
     let kind: Kind
-    var id: String { "\(kind == .simulator ? "sim" : "iphone"):\(udid)" }
+    var id: String {
+        let prefix: String
+        switch kind {
+        case .simulator: prefix = "sim"
+        case .iphone: prefix = "iphone"
+        case .android: prefix = "android"
+        }
+        return "\(prefix):\(udid)"
+    }
 }
 
 enum SimctlError: LocalizedError {
@@ -77,13 +85,22 @@ enum DeviceBackend {
         let simulators = ((try? Simctl.bootedDevices()) ?? []).map {
             LocationDevice(name: "\($0.name) · 模拟器", udid: $0.udid, kind: .simulator)
         }
-        return simulators + (try PhoneBridge.connectedDevices())
+        let iphones = Result { try PhoneBridge.connectedDevices() }
+        let androids = Result { try AndroidBridge.connectedDevices() }
+        let found = simulators + ((try? iphones.get()) ?? [])
+            + ((try? androids.get()) ?? [])
+        if found.isEmpty {
+            if case .failure(let error) = iphones { throw error }
+            if case .failure(let error) = androids { throw error }
+        }
+        return found
     }
 
     static func set(_ coordinate: Coordinate, device: LocationDevice) throws {
         switch device.kind {
         case .simulator: try Simctl.set(coordinate, device: device.udid)
         case .iphone: try PhoneBridge.shared.set(coordinate, udid: device.udid)
+        case .android: try AndroidBridge.set(coordinate, serial: device.udid)
         }
     }
 
@@ -91,6 +108,7 @@ enum DeviceBackend {
         switch device.kind {
         case .simulator: try Simctl.clear(device: device.udid)
         case .iphone: try PhoneBridge.shared.clear(udid: device.udid)
+        case .android: try AndroidBridge.clear(serial: device.udid)
         }
     }
 }
@@ -99,7 +117,7 @@ enum DeviceBackend {
 final class SimulatorController: ObservableObject {
     @Published var devices: [LocationDevice] = []
     @Published var selectedDevice = ""
-    @Published var status = "请先启动 iOS 模拟器，然后刷新设备。"
+    @Published var status = "请连接设备，然后刷新。"
     @Published private(set) var isRunning = false
     @Published private(set) var previewRoute: [Coordinate] = []
     @Published private(set) var previewSeed: UInt64 = 42
@@ -115,7 +133,7 @@ final class SimulatorController: ObservableObject {
                 if !found.contains(where: { $0.id == selectedDevice }) {
                     selectedDevice = found.first?.id ?? ""
                 }
-                status = found.isEmpty ? "未找到设备。请启动模拟器，或连接并信任已开启开发者模式的 iPhone。" : "找到 \(found.count) 台可用设备。"
+                status = found.isEmpty ? "未找到设备。请启动 iOS 模拟器，或连接 iPhone / 已开启 USB 调试的 Android。" : "找到 \(found.count) 台可用设备。"
             } catch {
                 status = error.localizedDescription
             }
@@ -222,3 +240,4 @@ final class SimulatorController: ObservableObject {
         try Task.checkCancellation()
     }
 }
+

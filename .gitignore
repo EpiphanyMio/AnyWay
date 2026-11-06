@@ -4,3 +4,7 @@ dist/
 DerivedData/
 .DS_Store
 *.xcuserstate
+android/.gradle/
+android/local.properties
+android/**/build/
+

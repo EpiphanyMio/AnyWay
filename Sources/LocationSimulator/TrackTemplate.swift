@@ -14,7 +14,7 @@ enum TrackTemplateError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidStraight: "两个端点应标出同一条长直边，相距 20～499 米。"
+        case .invalidStraight: "两个端点应标出同一条长直边，相距 20～199 米。"
         case .invalidLocation: "此位置无法生成跑道，请在远离极点的位置选择端点。"
         }
     }
@@ -27,7 +27,7 @@ struct GeneratedTrack {
 }
 
 enum TrackTemplate {
-    static let targetMeters = 1_000.0
+    static let targetMeters = 400.0
     private static let arcSegments = 48
 
     static func generate(from start: Coordinate, to end: Coordinate,
@@ -42,7 +42,7 @@ enum TrackTemplate {
         let east = longitudeDelta * longitudeScale
         let north = (end.latitude - start.latitude) * latitudeScale
         let straight = hypot(east, north)
-        guard straight >= 20, straight < 499, start.distance(to: end) < 499 else {
+        guard straight >= 20, straight < 200, start.distance(to: end) < 200 else {
             throw TrackTemplateError.invalidStraight
         }
         let alongEast = east / straight

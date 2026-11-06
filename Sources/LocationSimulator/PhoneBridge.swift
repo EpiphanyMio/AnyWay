@@ -4,10 +4,7 @@ final class PhoneBridge: @unchecked Sendable {
     static let shared = PhoneBridge()
 
     private let lock = NSLock()
-    private var process: Process?
-    private var input: FileHandle?
-    private var output: FileHandle?
-    private var activeUDID: String?
+    private var sessions: [String: Session] = [:]
 
     private static var projectDirectory: URL {
         URL(fileURLWithPath: #filePath)
@@ -70,99 +67,121 @@ final class PhoneBridge: @unchecked Sendable {
     }
 
     func set(_ coordinate: Coordinate, udid: String) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        do {
-            try connect(udid: udid)
-            try send(["action": "set", "latitude": coordinate.latitude,
-                      "longitude": coordinate.longitude])
-        } catch {
-            disconnect()
-            throw error
-        }
+        try session(for: udid).set(coordinate)
     }
 
     func clear(udid: String) throws {
+        try session(for: udid).clear()
+    }
+
+    private func session(for udid: String) -> Session {
         lock.lock()
         defer { lock.unlock() }
-        defer { disconnect() }
-        try connect(udid: udid)
-        try send(["action": "clear"])
+        if let session = sessions[udid] { return session }
+        let session = Session(udid: udid)
+        sessions[udid] = session
+        return session
     }
 
-    private func connect(udid: String) throws {
-        if process?.isRunning == true, activeUDID == udid { return }
-        if process?.isRunning == true {
-            try? send(["action": "clear"])
+    private final class Session {
+        private let udid: String
+        private let lock = NSLock()
+        private var process: Process?
+        private var input: FileHandle?
+        private var output: FileHandle?
+
+        init(udid: String) { self.udid = udid }
+
+        func set(_ coordinate: Coordinate) throws {
+            lock.lock()
+            defer { lock.unlock() }
+            do {
+                try connect()
+                try send(["action": "set", "latitude": coordinate.latitude,
+                          "longitude": coordinate.longitude])
+            } catch {
+                disconnect()
+                throw error
+            }
         }
-        disconnect()
-        guard FileManager.default.isExecutableFile(atPath: Self.pythonURL.path) else {
-            throw SimctlError.failed("缺少 iPhone Python 支持组件。请运行 scripts/install-iphone-support.sh 后重新打开应用。")
+
+        func clear() throws {
+            lock.lock()
+            defer { lock.unlock() }
+            defer { disconnect() }
+            try connect()
+            try send(["action": "clear"])
         }
-        guard FileManager.default.fileExists(atPath: Self.bridgeURL.path) else {
-            throw SimctlError.failed("缺少 iPhone 桥接脚本。请重新构建应用。")
-        }
-        let task = Process()
-        task.executableURL = Self.pythonURL
-        task.arguments = [Self.bridgeURL.path, udid]
-        let inputPipe = Pipe()
-        let outputPipe = Pipe()
-        task.standardInput = inputPipe
-        task.standardOutput = outputPipe
-        task.standardError = FileHandle.nullDevice
-        try task.run()
-        process = task
-        input = inputPipe.fileHandleForWriting
-        output = outputPipe.fileHandleForReading
-        activeUDID = udid
-        let response: [String: Any]
-        do {
-            response = try readResponse()
-        } catch {
+
+        private func connect() throws {
+            if process?.isRunning == true { return }
             disconnect()
-            throw error
+            guard FileManager.default.isExecutableFile(atPath: PhoneBridge.pythonURL.path) else {
+                throw SimctlError.failed("缺少 iPhone Python 支持组件。请运行 scripts/install-iphone-support.sh 后重新打开应用。")
+            }
+            guard FileManager.default.fileExists(atPath: PhoneBridge.bridgeURL.path) else {
+                throw SimctlError.failed("缺少 iPhone 桥接脚本。请重新构建应用。")
+            }
+            let task = Process()
+            task.executableURL = PhoneBridge.pythonURL
+            task.arguments = [PhoneBridge.bridgeURL.path, udid]
+            let inputPipe = Pipe()
+            let outputPipe = Pipe()
+            task.standardInput = inputPipe
+            task.standardOutput = outputPipe
+            task.standardError = FileHandle.nullDevice
+            try task.run()
+            process = task
+            input = inputPipe.fileHandleForWriting
+            output = outputPipe.fileHandleForReading
+            let response: [String: Any]
+            do {
+                response = try readResponse()
+            } catch {
+                disconnect()
+                throw error
+            }
+            guard response["ready"] as? Bool == true else {
+                let detail = response["error"] as? String ?? "连接失败"
+                disconnect()
+                throw SimctlError.failed("无法连接 iPhone 开发者定位服务：\(detail)。请确认已信任 Mac、开启开发者模式并在 Xcode 中完成设备准备。")
+            }
         }
-        guard response["ready"] as? Bool == true else {
-            let detail = response["error"] as? String ?? "连接失败"
-            disconnect()
-            throw SimctlError.failed("无法连接 iPhone 开发者定位服务：\(detail)。请确认已信任 Mac、开启开发者模式并在 Xcode 中完成设备准备。")
-        }
-    }
 
-    private func send(_ request: [String: Any]) throws {
-        guard process?.isRunning == true, let input else {
-            throw SimctlError.failed("iPhone 定位会话已断开。")
+        private func send(_ request: [String: Any]) throws {
+            guard process?.isRunning == true, let input else {
+                throw SimctlError.failed("iPhone 定位会话已断开。")
+            }
+            let data = try JSONSerialization.data(withJSONObject: request)
+            try input.write(contentsOf: data + Data([0x0A]))
+            let response = try readResponse()
+            guard response["ok"] as? Bool == true else {
+                throw SimctlError.failed(response["error"] as? String ?? "iPhone 定位操作失败。")
+            }
         }
-        let data = try JSONSerialization.data(withJSONObject: request)
-        try input.write(contentsOf: data + Data([0x0A]))
-        let response = try readResponse()
-        guard response["ok"] as? Bool == true else {
-            throw SimctlError.failed(response["error"] as? String ?? "iPhone 定位操作失败。")
-        }
-    }
 
-    private func readResponse() throws -> [String: Any] {
-        guard let output else { throw SimctlError.failed("iPhone 定位会话已断开。") }
-        var data = Data()
-        while true {
-            let byte = output.readData(ofLength: 1)
-            guard !byte.isEmpty else { throw SimctlError.failed("iPhone 定位服务意外退出。") }
-            if byte[0] == 0x0A { break }
-            data.append(byte)
+        private func readResponse() throws -> [String: Any] {
+            guard let output else { throw SimctlError.failed("iPhone 定位会话已断开。") }
+            var data = Data()
+            while true {
+                let byte = output.readData(ofLength: 1)
+                guard !byte.isEmpty else { throw SimctlError.failed("iPhone 定位服务意外退出。") }
+                if byte[0] == 0x0A { break }
+                data.append(byte)
+            }
+            guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw SimctlError.failed("iPhone 定位服务返回无效数据。")
+            }
+            return response
         }
-        guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw SimctlError.failed("iPhone 定位服务返回无效数据。")
-        }
-        return response
-    }
 
-    private func disconnect() {
-        input?.closeFile()
-        output?.closeFile()
-        if process?.isRunning == true { process?.terminate() }
-        process = nil
-        input = nil
-        output = nil
-        activeUDID = nil
+        private func disconnect() {
+            input?.closeFile()
+            output?.closeFile()
+            if process?.isRunning == true { process?.terminate() }
+            process = nil
+            input = nil
+            output = nil
+        }
     }
 }

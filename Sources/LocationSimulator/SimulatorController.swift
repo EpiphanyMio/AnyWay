@@ -116,22 +116,43 @@ enum DeviceBackend {
 @MainActor
 final class SimulatorController: ObservableObject {
     @Published var devices: [LocationDevice] = []
-    @Published var selectedDevice = ""
+    @Published private(set) var selectedDeviceIDs: Set<String> = []
     @Published var status = "请连接设备，然后刷新。"
     @Published private(set) var isRunning = false
+    @Published private(set) var isApplying = false
     @Published private(set) var previewRoute: [Coordinate] = []
     @Published private(set) var previewSeed: UInt64 = 42
 
     private var runningTask: Task<Void, Never>?
     private let tickSeconds = 0.5
 
+    var selectedDevices: [LocationDevice] {
+        devices.filter { selectedDeviceIDs.contains($0.id) }
+    }
+
+    var hasSelectedDevices: Bool { !selectedDevices.isEmpty }
+    var hasIPhones: Bool { devices.contains { $0.kind == .iphone } }
+    var isBusy: Bool { isRunning || isApplying }
+
+    func setSelected(_ id: String, isSelected: Bool) {
+        guard !isBusy else { return }
+        if isSelected { selectedDeviceIDs.insert(id) }
+        else { selectedDeviceIDs.remove(id) }
+    }
+
+    func selectAllIPhones() {
+        guard !isBusy else { return }
+        selectedDeviceIDs.formUnion(devices.filter { $0.kind == .iphone }.map(\.id))
+    }
+
     func refresh() {
         Task {
             do {
                 let found = try await Task.detached { try DeviceBackend.availableDevices() }.value
                 devices = found
-                if !found.contains(where: { $0.id == selectedDevice }) {
-                    selectedDevice = found.first?.id ?? ""
+                selectedDeviceIDs.formIntersection(Set(found.map(\.id)))
+                if selectedDeviceIDs.isEmpty, let first = found.first {
+                    selectedDeviceIDs.insert(first.id)
                 }
                 status = found.isEmpty ? "未找到设备。请启动 iOS 模拟器，或连接 iPhone / 已开启 USB 调试的 Android。" : "找到 \(found.count) 台可用设备。"
             } catch {
@@ -141,43 +162,40 @@ final class SimulatorController: ObservableObject {
     }
 
     func setPoint(_ coordinate: Coordinate) {
-        guard !selectedDevice.isEmpty, !isRunning else { return }
-        guard let device = devices.first(where: { $0.id == selectedDevice }) else { return }
-        if device.kind == .iphone { status = "正在连接 iPhone 开发者定位服务…" }
+        guard !isBusy, hasSelectedDevices else { return }
+        let targets = selectedDevices
+        isApplying = true
+        status = "正在向 \(targets.count) 台设备设置定位…"
         Task {
-            do {
-                try await Task.detached { try DeviceBackend.set(coordinate, device: device) }.value
-                status = "已设置定位：\(coordinate.simctlArgument)"
-            } catch {
-                status = error.localizedDescription
-            }
+            defer { isApplying = false }
+            let failures = await apply(to: targets) { try DeviceBackend.set(coordinate, device: $0) }
+            status = resultStatus(action: "设置定位", count: targets.count, failures: failures)
         }
     }
 
     func clear() {
-        guard !selectedDevice.isEmpty, !isRunning else { return }
-        guard let device = devices.first(where: { $0.id == selectedDevice }) else { return }
+        guard !isBusy, hasSelectedDevices else { return }
+        let targets = selectedDevices
+        isApplying = true
+        status = "正在清除 \(targets.count) 台设备的模拟定位…"
         Task {
-            do {
-                try await Task.detached { try DeviceBackend.clear(device: device) }.value
-                status = "已清除模拟定位。"
-            } catch {
-                status = error.localizedDescription
-            }
+            defer { isApplying = false }
+            let failures = await apply(to: targets) { try DeviceBackend.clear(device: $0) }
+            status = resultStatus(action: "清除定位", count: targets.count, failures: failures)
         }
     }
 
     func start(points: [Coordinate], speed: Double, jitter: Double,
                loops: Int, variationMeters: Double, dynamicSpeed: Bool,
                dynamicSpeedPlan: DynamicSpeedPlan) {
-        guard !selectedDevice.isEmpty, !isRunning,
+        guard hasSelectedDevices, !isBusy,
               points.count >= 2, speed.isFinite, speed > 0,
               jitter.isFinite, (0...100).contains(jitter), loops >= 1,
               variationMeters.isFinite, (0...20).contains(variationMeters),
               !dynamicSpeed || dynamicSpeedPlan.isValid(baseSpeed: speed) else { return }
-        guard let device = devices.first(where: { $0.id == selectedDevice }) else { return }
+        let targets = selectedDevices
         isRunning = true
-        status = "开始路径模拟。"
+        status = "开始向 \(targets.count) 台设备同步路径模拟。"
         runningTask = Task {
             var speedOffset = 0.0
             let runSeed = UInt64.random(in: UInt64.min...UInt64.max)
@@ -185,7 +203,7 @@ final class SimulatorController: ObservableObject {
                                        seed: runSeed, plan: dynamicSpeedPlan)
             let loopPoints = RouteLoop.closed(points)
             do {
-                try await send(loopPoints[0], to: device)
+                try await send(loopPoints[0], to: targets)
                 for pass in 0..<loops {
                     try Task.checkCancellation()
                     let seed = runSeed &+ UInt64(pass)
@@ -208,7 +226,7 @@ final class SimulatorController: ObservableObject {
                         let distance = motion.advance(seconds: elapsed,
                                                       speedMultiplier: 1 + speedOffset)
                         let next = stepper.advance(meters: distance)
-                        try await send(next, to: device)
+                        try await send(next, to: targets)
                         if dynamicSpeed {
                             let segment = motion.isRecovering
                                 ? (dynamicSpeedPlan.mode == .custom ? " · 低速段" : " · 慢走休息") : ""
@@ -234,10 +252,41 @@ final class SimulatorController: ObservableObject {
         runningTask?.cancel()
     }
 
-    private func send(_ coordinate: Coordinate, to device: LocationDevice) async throws {
+    private func send(_ coordinate: Coordinate, to targets: [LocationDevice]) async throws {
         try Task.checkCancellation()
-        try await Task.detached { try DeviceBackend.set(coordinate, device: device) }.value
+        let failures = await apply(to: targets) { try DeviceBackend.set(coordinate, device: $0) }
         try Task.checkCancellation()
+        if !failures.isEmpty {
+            throw SimctlError.failed(resultStatus(action: "路径模拟", count: targets.count,
+                                                  failures: failures))
+        }
+    }
+
+    private func apply(to targets: [LocationDevice],
+                       operation: @escaping @Sendable (LocationDevice) throws -> Void) async -> [String] {
+        await withTaskGroup(of: String?.self) { group in
+            for device in targets {
+                group.addTask {
+                    do {
+                        try operation(device)
+                        return nil
+                    } catch {
+                        return "\(device.name)：\(error.localizedDescription)"
+                    }
+                }
+            }
+            var failures: [String] = []
+            for await failure in group {
+                if let failure { failures.append(failure) }
+            }
+            return failures.sorted()
+        }
+    }
+
+    private func resultStatus(action: String, count: Int, failures: [String]) -> String {
+        let completed = count - failures.count
+        if failures.isEmpty { return "已为 \(count) 台设备\(action)。" }
+        return "\(action)：\(completed)/\(count) 台成功。\(failures.joined(separator: "；"))"
     }
 }
 

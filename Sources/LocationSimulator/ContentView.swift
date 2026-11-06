@@ -318,17 +318,29 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 card("目标设备", icon: "iphone.gen3") {
-                    HStack(spacing: 8) {
-                        Picker("", selection: $controller.selectedDevice) {
-                            if controller.devices.isEmpty { Text("没有可用设备").tag("") }
-                            ForEach(controller.devices) { device in
-                                Text(device.name).tag(device.id)
-                            }
+                    VStack(alignment: .leading, spacing: 6) {
+                        if controller.devices.isEmpty {
+                            Text("没有可用设备").foregroundStyle(.secondary)
                         }
-                        .labelsHidden()
+                        ForEach(controller.devices) { device in
+                            Toggle(device.name, isOn: Binding(
+                                get: { controller.selectedDeviceIDs.contains(device.id) },
+                                set: { controller.setSelected(device.id, isSelected: $0) }
+                            ))
+                            .toggleStyle(.checkbox)
+                            .disabled(controller.isBusy)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Text("已选 \(controller.selectedDevices.count) 台")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("全选 iPhone") { controller.selectAllIPhones() }
+                            .disabled(!controller.hasIPhones || controller.isBusy)
                         Button { controller.refresh() } label: {
                             Image(systemName: "arrow.clockwise")
                         }
+                        .disabled(controller.isBusy)
                         .help("刷新模拟器、iPhone 与 Android 设备")
                     }
                 }
@@ -351,7 +363,7 @@ struct ContentView: View {
                             .tint(accent)
                         Button("清除定位") { controller.clear() }
                     }
-                    .disabled(controller.selectedDevice.isEmpty || controller.isRunning)
+                    .disabled(!controller.hasSelectedDevices || controller.isBusy)
                 }
 
                 card("路径编辑", icon: "point.topleft.down.curvedto.point.bottomright.up") {
@@ -383,7 +395,7 @@ struct ContentView: View {
                     }
                 }
 
-                card("1000 米环形跑道", icon: "figure.run.circle") {
+                card("400 米环形跑道", icon: "figure.run.circle") {
                     Text("在地图上标出一条长直边的两个端点；模板会补全另一条直边和两端弯道。")
                         .font(.caption).foregroundStyle(.secondary)
                     Picker("展开方向", selection: $trackSide) {
@@ -392,7 +404,7 @@ struct ContentView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text("方向按第 1 点到第 2 点判断；两点需相距 20～499 米。")
+                    Text("方向按第 1 点到第 2 点判断；两点需相距 20～199 米。")
                         .font(.caption2).foregroundStyle(.secondary)
                     Button("由两个端点生成跑道") { generateTrack() }
                         .disabled(controller.isRunning)
@@ -452,7 +464,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(accent)
-                    .disabled(controller.selectedDevice.isEmpty || controller.isRunning)
+                    .disabled(!controller.hasSelectedDevices || controller.isBusy)
 
                     Button {
                         controller.stop()
@@ -610,8 +622,8 @@ struct ContentView: View {
         placeSearch.rememberCurrentQuery()
         latitude = String(selected.coordinate.latitude)
         longitude = String(selected.coordinate.longitude)
-        if controller.selectedDevice.isEmpty {
-            controller.status = "已将“\(selected.name)”填入单点坐标；请选择模拟器后设置定位。"
+        if !controller.hasSelectedDevices {
+            controller.status = "已将“\(selected.name)”填入单点坐标；请选择设备后设置定位。"
         } else {
             controller.setPoint(selected.coordinate)
         }

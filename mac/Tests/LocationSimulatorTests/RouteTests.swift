@@ -117,17 +117,17 @@ final class RouteTests: XCTestCase {
                         .isValid(baseSpeed: 4))
     }
 
-    func testThousandMeterTrackFromStraightEndpoints() throws {
+    func testFourHundredMeterTrackFromStraightEndpoints() throws {
         let start = try Coordinate(latitude: 39.9, longitude: 116.4)
-        let end = try Coordinate(latitude: 39.9, longitude: 116.4035)
+        let end = try Coordinate(latitude: 39.9, longitude: 116.401)
         let left = try TrackTemplate.generate(from: start, to: end, side: .left)
         let right = try TrackTemplate.generate(from: start, to: end, side: .right)
         XCTAssertEqual(left.points.first, start)
         XCTAssertEqual(left.points[1], end)
         XCTAssertEqual(left.points.last, start)
         XCTAssertEqual(left.points.count, 99)
-        XCTAssertEqual(left.lengthMeters, 1_000, accuracy: 0.05)
-        XCTAssertEqual(right.lengthMeters, 1_000, accuracy: 0.05)
+        XCTAssertEqual(left.lengthMeters, 400, accuracy: 0.05)
+        XCTAssertEqual(right.lengthMeters, 400, accuracy: 0.05)
         XCTAssertGreaterThan(left.points[50].latitude, start.latitude)
         XCTAssertLessThan(right.points[50].latitude, start.latitude)
         XCTAssertThrowsError(try TrackTemplate.generate(from: start, to: start,

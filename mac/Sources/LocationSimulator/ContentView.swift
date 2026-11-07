@@ -165,7 +165,14 @@ struct ContentView: View {
                          searchCoordinate: placeSearch.selected?.coordinate,
                          searchTitle: placeSearch.selected?.name ?? "",
                          focusRevision: placeSearch.focusRevision,
-                         singlePoint: try? RouteParser.coordinate(latitude: latitude, longitude: longitude)) { point in
+                         singlePoint: try? RouteParser.coordinate(latitude: latitude, longitude: longitude),
+                         editable: !controller.isRunning && !textPending,
+                         onPointMoved: { index, point in
+                guard !controller.isRunning, !textPending, points.indices.contains(index) else { return }
+                points[index] = point
+                syncRouteText()
+                controller.status = "已移动第 \(index + 1) 个路径点。"
+            }) { point in
                 guard !controller.isRunning else { return }
                 if selectingSinglePoint {
                     latitude = String(point.latitude)

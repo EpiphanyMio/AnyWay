@@ -14,7 +14,7 @@ struct LocationSimulatorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("定位模拟器") {
+        WindowGroup("AnyWay") {
             ContentView()
                 .frame(minWidth: 980, minHeight: 690)
         }

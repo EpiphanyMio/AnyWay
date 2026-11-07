@@ -2,7 +2,7 @@ import AppKit
 import MapKit
 import SwiftUI
 
-final class RoutePointAnnotation: MKPointAnnotation {}
+final class RoutePointAnnotation: MKPointAnnotation { var index = 0 }
 final class SearchPointAnnotation: MKPointAnnotation {}
 final class SinglePointAnnotation: MKPointAnnotation {}
 
@@ -16,6 +16,8 @@ struct RouteMapView: NSViewRepresentable {
     let searchTitle: String
     let focusRevision: Int
     let singlePoint: Coordinate?
+    let editable: Bool
+    let onPointMoved: (Int, Coordinate) -> Void
     let onMapClick: (Coordinate) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -44,14 +46,19 @@ struct RouteMapView: NSViewRepresentable {
         if coordinator.renderedPoints != points {
             coordinator.renderedPoints = points
             map.removeAnnotations(map.annotations.filter { $0 is RoutePointAnnotation })
-            let markerStep = points.count > 30 ? max(1, points.count / 12) : 1
             for (index, point) in points.enumerated() {
                 if points.count > 1 && index == points.count - 1 && point == points.first { continue }
-                if points.count > 30 && index > 1 && index % markerStep != 0 { continue }
                 let annotation = RoutePointAnnotation()
+                annotation.index = index
                 annotation.coordinate = CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
                 annotation.title = "\(index + 1)"
                 map.addAnnotation(annotation)
+            }
+        }
+        if coordinator.renderedEditable != editable {
+            coordinator.renderedEditable = editable
+            for annotation in map.annotations where annotation is RoutePointAnnotation {
+                map.view(for: annotation)?.isDraggable = editable
             }
         }
         if coordinator.renderedSearchCoordinate != searchCoordinate
@@ -130,6 +137,7 @@ struct RouteMapView: NSViewRepresentable {
         var parent: RouteMapView
         weak var mapView: MKMapView?
         var renderedPoints: [Coordinate] = []
+        var renderedEditable: Bool?
         var renderedPreviewRoute: [Coordinate] = []
         var renderedVariation = -1.0
         var renderedSeed: UInt64 = 0
@@ -210,6 +218,18 @@ struct RouteMapView: NSViewRepresentable {
             return renderer
         }
 
+        func mapView(_ mapView: MKMapView, annotationView view: MKAnnotationView,
+                     didChange newState: MKAnnotationView.DragState,
+                     fromOldState oldState: MKAnnotationView.DragState) {
+            guard newState == .ending, parent.editable,
+                  let annotation = view.annotation as? RoutePointAnnotation,
+                  annotation.index < parent.points.count,
+                  let point = try? Coordinate(latitude: annotation.coordinate.latitude,
+                                              longitude: annotation.coordinate.longitude) else { return }
+            parent.onPointMoved(annotation.index, point)
+            view.dragState = .none
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
             guard annotation is RoutePointAnnotation || annotation is SearchPointAnnotation
                     || annotation is SinglePointAnnotation else { return nil }
@@ -222,6 +242,7 @@ struct RouteMapView: NSViewRepresentable {
             view.markerTintColor = isSearch ? .systemOrange : (isSinglePoint ? .systemPurple : .systemTeal)
             view.glyphText = isSearch ? "⌕" : (isSinglePoint ? "◎" : (annotation.title ?? "•"))
             view.canShowCallout = isSearch || isSinglePoint
+            view.isDraggable = annotation is RoutePointAnnotation && parent.editable
             return view
         }
     }

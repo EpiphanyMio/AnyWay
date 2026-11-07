@@ -1,0 +1,12 @@
+.venv/
+.toolchains/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+android-companion/.gradle/
+android-companion/local.properties
+android-companion/app/build/
+
+android-companion/gradle/wrapper/gradle-wrapper.jar

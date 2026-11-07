@@ -1,0 +1,46 @@
+name: AnyWay cross-platform CI
+on:
+  push:
+    branches: [main, anyway/monorepo]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/check_versions.py
+  mac:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Mac application
+        working-directory: mac
+        run: swift test
+      - name: Build Mac application
+        working-directory: mac
+        run: bash scripts/build-app.sh
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Test Windows application
+        working-directory: windows
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+      - name: Build Windows application
+        working-directory: windows
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Smoke test Windows executable
+        shell: pwsh
+        run: |
+          & ./windows/dist/WindowsLocationSimulator/WindowsLocationSimulator.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

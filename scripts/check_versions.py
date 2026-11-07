@@ -1,0 +1,19 @@
+"""Check that both platform build paths use the root product version."""
+from pathlib import Path
+import re
+
+root = Path(__file__).resolve().parents[1]
+version = (root / "VERSION").read_text(encoding="utf-8").strip()
+assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
+checks = {
+    "mac/scripts/build-app.sh": ("cat ../VERSION", "<string>$version</string>"),
+    "mac/scripts/build-pkg.sh": ("AnyWay-$version-arm64.pkg",),
+    "mac/android/app/build.gradle": ("../../VERSION",),
+    "windows/android-companion/app/build.gradle.kts": ("../../VERSION",),
+    "windows/packaging/windows.iss": (f'#define AppVersion "{version}"', "AnyWay-{#AppVersion}-Windows-Setup"),
+}
+for path, markers in checks.items():
+    content = (root / path).read_text(encoding="utf-8")
+    for marker in markers:
+        assert marker in content, f"{path}: missing {marker}"
+print(f"AnyWay {version}: platform versions aligned")

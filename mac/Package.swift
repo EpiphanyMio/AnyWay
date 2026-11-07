@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "LocationSimulator",
+    name: "AnyWay",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "LocationSimulator", targets: ["LocationSimulator"])],
     targets: [

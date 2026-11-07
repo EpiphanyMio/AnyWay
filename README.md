@@ -1,65 +1,19 @@
-# 定位模拟器
+# AnyWay
 
-一个在 **Mac 上运行**的 SwiftUI 工具，可修改 **iOS 模拟器**、已连接的 **实体 iPhone（iOS 17 或更新版本）**，以及安装了配套 App 的 **实体 Android（Android 8.0 或更新版本）** 的模拟定位。支持地点搜索、地图绘制、单点定位、弯曲路径模拟、速度随机抖动、逐趟路径误差，以及 JSON 配置文件的保存与导入。
+AnyWay �� Mac �� Windows �����涨λģ���������� JSON ���ø�ʽ��`schemaVersion: 1`��������֧�ֵ��㡢·����Լ 400 ���ܵ�ģ�壻�ѻ���·������϶�������Mac ��֧�� iOS ģ������ʵ�� iPhone��Windows ��֧��ʵ�� iPhone�����˾������� Android ʵ���豸��Windows �˻�֧�� HarmonyOS 7+ �� hdc/testhelper��
 
-## Xcode 26.3 中运行
+## �ֿ�ṹ
 
-1. 安装 Xcode 26.3，并在 Xcode 的 **Settings → Platforms** 安装所需的 iOS Simulator runtime。首次启动 Xcode 时完成组件安装。
-2. 用 Xcode 打开本目录的 `Package.swift`，选择 **LocationSimulator** scheme，运行目标选 **My Mac**，按 **⌘R**。
-3. 在 Xcode 中启动一个 iOS 模拟器（**Window → Devices and Simulators**，或先运行任意 iOS 项目）。回到定位模拟器，点击“刷新”。
-4. 选中设备后，在“单点定位”中点击“在地图上选点”，再单击左侧地图选择位置；坐标会自动填入，点击“设置定位”即可生效。也可直接输入坐标，或搜索地点后点击“设为单点”。路径绘制时退出地图选点，在地图上依次单击至少两个点，设置参数后点击“开始模拟”。也可以切到“坐标文本”，每行输入一个 `纬度,经度` 并点击“应用到地图”。
-5. “停止”会保留当前坐标；“清除定位”会让模拟器恢复默认定位行为。
+- `mac/`��SwiftUI/MapKit Ӧ�á�Mac Android ���׹��̺� `.pkg` �����ű���
+- `windows/`��PySide6/Leaflet Ӧ�á�Windows Android ���׹��̺� `.exe` ��װ���ű���
+- `VERSION`����������Ӧ�ú����� App ��ͳһ�汾�š��޸İ汾ʱֻ�༭���ļ���
+- `scripts/check_versions.py` �� `.github/workflows/ci.yml`����ƽ̨�汾�빹����顣
 
-## 连接实体 iPhone
+Mac ���к��豸���Ӳ���� [mac/README.md](mac/README.md)��Windows ����� [windows/README.md](windows/README.md)��
 
-1. 用数据线将 iPhone 连接到 Mac，在手机上解锁并选择“信任此电脑”。在 iPhone 的“设置 → 隐私与安全性”中开启“开发者模式”，按系统提示重启并确认。
-2. 在 Xcode 的“Window → Devices and Simulators”中确认设备已完成配对和开发者组件准备。实体设备定位通过 [pymobiledevice3 的 DVT 定位服务](https://github.com/doronz88/pymobiledevice3/blob/master/docs/guides/cli-recipes.md#dvt-examples) 实现。
-3. 运行 `bash scripts/install-iphone-support.sh` 安装项目内的 iPhone 支持组件。用 Xcode 调试运行或运行 `bash scripts/build-app.sh` 构建应用后，在应用内点击“刷新”，选择“iOS 设备”，即可使用单点、路径和清除定位。
+## ����
 
-可在“目标设备”中勾选多台 iPhone，或点击“全选 iPhone”。单点定位、路径模拟与清除定位会发送到所有已选设备；路径模拟使用同一条路线和相同的时间步进。若任一设备在路径模拟中报错，当前模拟会停止并显示该设备的错误。
+- Mac���� `mac/` ִ�� `bash scripts/build-app.sh`��Apple Silicon ��װ��ִ�� `bash scripts/build-pkg.sh`��
+- Windows���� `windows/` ִ�� `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`��Ȼ���Ը�Ŀ¼ `VERSION` ��ֵ���� `packaging/windows.iss`��
 
-设备需要保持连接，退出应用会结束开发者定位会话。定位服务受 iOS 版本与开发者模式限制；若设备连接失败，应用会显示具体错误。
-
-## 连接实体 Android
-
-Android 支持位于独立的 [`android/`](android/) 工程，Mac 端使用 Android SDK Platform-Tools 的 `adb` 与它通信。支持 Android 8.0（API 26）及以上的未 root 设备。使用前在 Mac 安装 Platform-Tools，并在 Android Studio 中打开 `android/`、使用 Gradle 8.9 和 JDK 17 构建 Debug APK。构建产物位于 `android/app/build/outputs/apk/debug/app-debug.apk`。连接并信任开启 USB 调试的设备后，可运行 `bash android/install.sh 设备序列号` 安装；序列号由 `adb devices` 查看。也可以直接在 Android Studio 中安装运行。
-
-在设备上打开“定位模拟器”，进入系统开发者选项，把它选为“模拟位置信息应用”，并保持系统定位开启。回到 Mac 应用点击“刷新”，选择带有 Android 标记的设备，即可使用现有的单点、路径和清除定位。若有多台设备，Mac 应用会使用各自的 ADB 序列号定向发送。`scripts/build-app.sh` 会在 APK 已构建时把它一并放入 Mac 应用的 `Contents/Resources/LocationSimulator-Android.apk`，方便分发安装。
-
-Android 配套 App 通过系统测试定位接口注入 GPS 坐标。Mac 应用调用 ADB 显式广播，接收端仅允许具备系统 `DUMP` 权限的发送者，普通第三方 App 不能直接发送定位命令。停止路径后定位停留在最后一点；点击“清除定位”会删除测试定位提供者。设备可能将该坐标标记为模拟位置，部分应用会拒绝或忽略它。无需 root，亦无法绕过应用的模拟位置检测。
-
-地图上方可以搜索地点或学校。若搜索结果识别为学校，工具会并行搜索附近的运动场、篮球场、操场、足球场、网球场、体育馆、游泳馆、羽毛球场和健身中心等运动场地，按距离去重排序。点击结果可将地图移至该地点，并可选择“设为单点”或“加入路线”。推荐结果取决于 Apple 地图的数据覆盖范围和网络连接。
-
-“400 米环形跑道”模板只需一条长直边的两个端点：在地图上依次点击，或在坐标文本中输入两个坐标，选择以第 1 点到第 2 点方向的左侧或右侧展开，再点击“由两个端点生成跑道”。直边长度须为 20～199 米；模板自动补出另一条直边和两端弯道，并将闭合路线调整到约 400 米。生成后仍可编辑路径点。
-
-搜索框旁的时钟按钮可查看并重用最近 12 条搜索记录。手动搜索或使用搜索结果时才会记入历史，输入过程中的自动搜索不会记录。标题栏的“设置”（⌘,）可控制启动时是否恢复上次路线、是否自动刷新设备，也可清除搜索历史或已保存的路线记忆。路线记忆自动保存路径点、尚未应用的坐标文本和移动参数；默认在下次启动时恢复。
-
-搜索支持“浙大”“北邮”等简称。Apple 地图尚未返回北京邮电大学沙河校区时，工具使用 [OpenStreetMap 的校区位置](https://www.openstreetmap.org/way/685054417) 显示结果；地点详情中会注明来源。
-
-右上角的“保存配置”会保存方案名称、单点坐标、路径点、速度、抖动、圈数、动态速度配置和路线偏移上限为 `.json` 文件；“导入配置”会校验文件并在地图上恢复路线。旧版 JSON 缺少偏移参数时默认使用 2 米，缺少动态速度开关时默认关闭，缺少动态速度方案时默认“校园跑”。模拟器设备不写入配置，因为其设备 ID 会随安装环境变化。文本坐标有未应用的修改时，请先应用到地图，再继续点击地图绘制。
-
-速度单位为米/秒，也可输入每 1000 米的分、秒配速自动换算。约每 0.5 秒更新一次坐标，并按实际经过的时间推进距离。速度在设定值附近逐步随机变化；例如 5 m/s、±15% 时，目标速度位于 4.25～5.75 m/s。勾选“动态速度”后，可从下拉列表选择“校园跑”“轻松跑”“耐力跑”自动范例，或自定义每隔多少公里进入低速段、低速配速和持续秒数；该节奏跨圈延续。路线沿全程加入连续变化的二维位置误差，不会机械地走直线；每圈重新生成轨迹，偏移不超过设定上限，短路线还会进一步缩小误差。中途路径点允许小幅偏差，闭合点保持准确。地图曲线会预览当前圈的轨迹。终点自动连接起点，每圈沿同一方向运行，例如 A→B→C→A→B→C→A。系统调度和 `simctl` 执行时间可能造成少量时间误差。
-
-## 限制
-
-- 本工具需要在 Mac 上运行；实体 iPhone 功能依赖开发者模式、已信任连接和 iOS 开发者服务，不是 iPhone 上普通 App 的公开定位修改 API。
-- 实体 Android 功能依赖 USB 调试、ADB 和用户在开发者选项中指定配套模拟位置 App；系统及其他 App 可识别模拟位置。
-- 实体设备的兼容性会随 iOS 更新变化。已在通过 USB 连接的 iPhone 17 Pro（iOS 27.3 beta）上验证设备识别、设置定位和清除定位；路径模拟已在应用中启动并向设备发送起点。
-- 仅用于开发和测试，请遵守所测试服务的使用条款。
-
-## 命令行构建与运行
-
-运行 `bash scripts/build-app.sh` 生成 `.build/LocationSimulator.app`，然后运行
-`open .build/LocationSimulator.app`。使用应用包启动可正常注册 macOS 窗口和键盘焦点。
-
-## 安装包
-
-在 Apple Silicon Mac 上运行 `bash scripts/build-pkg.sh`，生成
-`dist/LocationSimulator-1.1.0-arm64.pkg` 和对应的 `.sha256` 校验文件。把安装包复制到另一台 Apple Silicon Mac 后双击安装，应用会放在“应用程序”文件夹。安装包内包含 iPhone 支持组件，目标电脑无需运行 Python 安装脚本；运行模拟器定位仍需在目标电脑安装 Xcode，实体 iPhone 还需开启开发者模式并完成信任与配对。
-
-目前安装包未使用 Apple Developer ID 签名或公证。若 macOS 拦截从网络下载的安装包，请在“系统设置 → 隐私与安全性”中允许打开；正式公开分发建议使用 Developer ID Installer 证书签名并公证。
-
-## 单元测试
-
-在 Xcode 中选择 **Product → Test**，或在 Mac 终端运行 `swift test`。
-
+ÿ���޸Ĺ��ù��ܡ����ø�ʽ��汾��ʱ���������ƽ̨��ʵ����˵���������ж�Ӧ���ԡ��ֿ� CI �ֱ�ִ�� Swift �� Python ���ԡ���������Ӧ�á�

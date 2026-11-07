@@ -1,0 +1,146 @@
+name: Consolidate AnyWay 0.1.0 release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/consolidate-release.yml
+      - mac/scripts/build-app.sh
+      - mac/scripts/build-pkg.sh
+      - mac/scripts/install-iphone-support.sh
+      - windows/packaging/windows.iss
+
+jobs:
+  mac:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Build Mac Android companion
+        working-directory: mac/android
+        run: gradle :app:assembleDebug
+      - name: Test Mac application
+        working-directory: mac
+        run: swift test
+      - name: Build Mac package
+        working-directory: mac
+        run: bash scripts/build-pkg.sh
+      - name: Name Mac assets
+        run: |
+          version="$(cat VERSION)"
+          mkdir -p release/mac
+          mv "mac/dist/AnyWay-$version-arm64.pkg" "release/mac/AnyWay-$version-macOS-arm64.pkg"
+          cp mac/android/app/build/outputs/apk/debug/app-debug.apk "release/mac/AnyWay-$version-macOS-Android.apk"
+          shasum -a 256 release/mac/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-release
+          path: release/mac/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Test Windows application
+        working-directory: windows
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+      - name: Build Windows application
+        working-directory: windows
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Smoke test Windows executable
+        shell: pwsh
+        run: |
+          & ./windows/dist/WindowsLocationSimulator/WindowsLocationSimulator.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Windows installer
+        working-directory: windows
+        shell: pwsh
+        run: |
+          $version = (Get-Content ../VERSION -Raw).Trim()
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          )
+          $compiler = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $compiler) { $compiler = (Get-Command ISCC.exe -ErrorAction Stop).Source }
+          & $compiler "/DAppVersion=$version" 'packaging\windows.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash "dist\release\AnyWay-$version-Windows-Setup.exe" -Algorithm SHA256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: windows/dist/release/AnyWay-*-Windows-Setup.exe
+          if-no-files-found: error
+
+  publish:
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release'
+          path: release
+          merge-multiple: true
+      - name: Check shared version
+        run: python scripts/check_versions.py
+      - name: Publish one release for both platforms
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          test "$version" = '0.1.0'
+          test -s "release/AnyWay-$version-macOS-arm64.pkg"
+          test -s "release/AnyWay-$version-macOS-Android.apk"
+          test -s "release/AnyWay-$version-Windows-Setup.exe"
+          gh release download "v$version" --pattern 'WinLS-0.1.0-Android.apk' --dir release
+          printf '%s  %s\n' \
+            '59cb09e51fca54f5cd0635261c91a8794bf25c2f74439bc960e9de3fa8c94473' \
+            'release/WinLS-0.1.0-Android.apk' | sha256sum --check
+          mv release/WinLS-0.1.0-Android.apk "release/AnyWay-$version-Windows-Android.apk"
+          (cd release && sha256sum AnyWay-* > "AnyWay-$version-SHA256SUMS.txt")
+          cat > release-notes.md <<'NOTES'
+          # AnyWay 0.1.0
+
+          Mac 和 Windows 共用 0.1.0 版本。安装包按主机系统命名；两份 Android APK 分别与对应主机版本配套。
+
+          - macOS：Apple Silicon 安装包及 Mac 配套 Android APK。包含约 400 米跑道模板和地图路径点拖动调整。
+          - Windows：64 位安装包及 Windows 配套 Android APK。支持 iOS、Android 和 HarmonyOS 7+ 设备的开发者模拟定位。
+          - `SHA256SUMS.txt`：下载后可用于核对安装包和 APK。
+
+          Mac 安装包使用临时签名，Windows 安装包未签名。安装和设备连接说明见仓库 README。
+          NOTES
+          gh release upload "v$version" release/AnyWay-* --clobber
+          gh release edit "v$version" --title "AnyWay $version" --notes-file release-notes.md --latest
+          for asset in \
+            "AnyWay-$version-macOS-arm64.pkg" \
+            "AnyWay-$version-macOS-Android.apk" \
+            "AnyWay-$version-Windows-Setup.exe" \
+            "AnyWay-$version-Windows-Android.apk" \
+            "AnyWay-$version-SHA256SUMS.txt"; do
+            gh release view "v$version" --json assets --jq '.assets[].name' | grep -Fx "$asset"
+          done
+          gh release delete-asset "v$version" WinLS-0.1.0-Android.apk --yes
+          gh release delete-asset "v$version" WinLS-0.1.0-Windows-Setup.exe --yes
+          gh release delete v1.1.0 --yes
+

@@ -1,19 +1,22 @@
 # AnyWay
 
-AnyWay �� Mac �� Windows �����涨λģ���������� JSON ���ø�ʽ��`schemaVersion: 1`��������֧�ֵ��㡢·����Լ 400 ���ܵ�ģ�壻�ѻ���·������϶�������Mac ��֧�� iOS ģ������ʵ�� iPhone��Windows ��֧��ʵ�� iPhone�����˾������� Android ʵ���豸��Windows �˻�֧�� HarmonyOS 7+ �� hdc/testhelper��
+AnyWay 是适用于 Mac 和 Windows 的桌面定位模拟器。两个平台共用 `schemaVersion: 1` 的 JSON 配置格式，支持单点定位、路线模拟、约 400 米跑道模板，以及拖动已绘制的路径点调整路线。
 
-## �ֿ�ṹ
+Mac 端支持 iOS 模拟器、实体 iPhone 和 Android 实体设备。Windows 端支持实体 iPhone、Android 实体设备，以及 HarmonyOS 7+ 设备。
 
-- `mac/`��SwiftUI/MapKit Ӧ�á�Mac Android ���׹��̺� `.pkg` �����ű���
-- `windows/`��PySide6/Leaflet Ӧ�á�Windows Android ���׹��̺� `.exe` ��װ���ű���
-- `VERSION`����������Ӧ�ú����� App ��ͳһ�汾�š��޸İ汾ʱֻ�༭���ļ���
-- `scripts/check_versions.py` �� `.github/workflows/ci.yml`����ƽ̨�汾�빹����顣
+## 项目结构
 
-Mac ���к��豸���Ӳ���� [mac/README.md](mac/README.md)��Windows ����� [windows/README.md](windows/README.md)��
+- [`mac/`](mac/)：SwiftUI/MapKit 应用、Mac 端 Android 配套工程及 `.pkg` 构建脚本。
+- [`windows/`](windows/)：PySide6/Leaflet 应用、Windows 端 Android 配套工程及 `.exe` 安装包脚本。
+- [`VERSION`](VERSION)：两个平台共用的软件版本号；当前为 **0.1.0**。
+- [`scripts/check_versions.py`](scripts/check_versions.py)：检查平台构建配置是否使用统一版本号。
 
-## ����
+设备连接和运行步骤分别见 [Mac 说明](mac/README.md) 与 [Windows 说明](windows/README.md)。
 
-- Mac���� `mac/` ִ�� `bash scripts/build-app.sh`��Apple Silicon ��װ��ִ�� `bash scripts/build-pkg.sh`��
-- Windows���� `windows/` ִ�� `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`��Ȼ���Ը�Ŀ¼ `VERSION` ��ֵ���� `packaging/windows.iss`��
+## 构建与验证
 
-ÿ���޸Ĺ��ù��ܡ����ø�ʽ��汾��ʱ���������ƽ̨��ʵ����˵���������ж�Ӧ���ԡ��ֿ� CI �ֱ�ִ�� Swift �� Python ���ԡ���������Ӧ�á�
+在 `mac/` 目录执行 `bash scripts/build-app.sh` 构建 Mac 应用；在 Apple Silicon Mac 上执行 `bash scripts/build-pkg.sh` 构建安装包。
+
+在 `windows/` 目录执行 `powershell -ExecutionPolicy Bypass -File scripts\build.ps1` 构建 Windows 应用。仓库 CI 会分别运行 Mac 和 Windows 的测试与应用构建，并检查统一版本号。
+
+新增两端共有的功能时，请同步更新 `mac/` 和 `windows/` 的实现与文档。

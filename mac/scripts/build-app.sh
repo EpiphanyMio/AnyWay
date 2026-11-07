@@ -19,17 +19,17 @@ fi
 bundled_venv="$app_dir/Contents/Resources/iphone-venv"
 rm -rf "$bundled_venv"
 if [ -x .build/iphone-venv/bin/python ]; then
-    mkdir -p "$bundled_venv/bin" "$bundled_venv/lib/python3.9"
-    ditto .build/iphone-venv/lib/python3.9/site-packages \
-        "$bundled_venv/lib/python3.9/site-packages"
+    site_packages="$(.build/iphone-venv/bin/python -c 'import site; print(site.getsitepackages()[0])')"
+    mkdir -p "$bundled_venv/bin" "$bundled_venv/lib"
+    ditto "$site_packages" "$bundled_venv/lib/site-packages"
     # Wheel installation records contain this Mac's absolute cache paths.
-    find "$bundled_venv/lib/python3.9/site-packages" -type f -name RECORD -delete
+    find "$bundled_venv/lib/site-packages" -type f -name RECORD -delete
     # Load the bundled packages using the target Mac's selected Xcode Python.
     cat > "$bundled_venv/bin/python" <<'PYTHON_LAUNCHER'
 #!/bin/sh
 set -eu
 support_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-export PYTHONPATH="$support_dir/lib/python3.9/site-packages"
+export PYTHONPATH="$support_dir/lib/site-packages"
 export PYTHONNOUSERSITE=1
 exec "$(xcrun --find python3)" "$@"
 PYTHON_LAUNCHER

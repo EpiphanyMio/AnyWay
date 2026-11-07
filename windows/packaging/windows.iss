@@ -6,8 +6,8 @@
 AppId={{6E9EE0AA-C970-47CD-9E16-D4CBA61F3144}
 AppName=AnyWay
 AppVersion={#AppVersion}
-AppPublisher=WinLS
-DefaultDirName={localappdata}\Programs\WinLS
+AppPublisher=AnyWay
+DefaultDirName={localappdata}\Programs\AnyWay
 DefaultGroupName=AnyWay
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible

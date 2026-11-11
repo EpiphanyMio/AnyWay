@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @StateObject private var controller = SimulatorController()
     @StateObject private var placeSearch = PlaceSearchController()
+    @StateObject private var updateChecker = UpdateChecker()
     @AppStorage("restoreLastRoute") private var restoreLastRoute = true
     @AppStorage("autoRefreshDevices") private var autoRefreshDevices = true
     @AppStorage("hasAcknowledgedResearchNotice") private var hasAcknowledgedResearchNotice = false
@@ -33,6 +34,7 @@ struct ContentView: View {
     @State private var editorMode = 0
     @State private var selectingSinglePoint = false
     @State private var showingSettings = false
+    @State private var updateMessage: String?
     @State private var showingSearchHistory = false
     @State private var hasLoadedDraft = false
     @State private var hasSavedDraft = false
@@ -67,16 +69,36 @@ struct ContentView: View {
             .padding(.vertical, 12)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .disabled(updateChecker.requiresUpdate)
+        .overlay {
+            if updateChecker.requiresUpdate {
+                updateRequiredView
+            }
+        }
         .onAppear {
+            Task { await updateChecker.check() }
             if !hasAcknowledgedResearchNotice { showingResearchNotice = true }
             if !hasLoadedDraft { restoreDraftIfNeeded() }
             if autoRefreshDevices { controller.refresh() }
+        }
+        .onChange(of: updateChecker.requiresUpdate) { required in
+            if required {
+                showingSettings = false
+                controller.stop()
+            }
         }
         .onChange(of: routeDraft) { draft in
             guard hasLoadedDraft else { return }
             if RouteDraftStore().save(draft) { hasSavedDraft = true }
         }
         .sheet(isPresented: $showingSettings) { settingsSheet }
+        .alert("检查更新", isPresented: Binding(
+            get: { updateMessage != nil },
+            set: { if !$0 { updateMessage = nil } })) {
+                Button("确定") { updateMessage = nil }
+            } message: {
+                Text(updateMessage ?? "")
+            }
         .alert("使用须知", isPresented: $showingResearchNotice) {
             Button("我已知悉") { hasAcknowledgedResearchNotice = true }
         } message: {
@@ -131,6 +153,20 @@ struct ContentView: View {
             Text("自动记住路径点、未应用的坐标文本和移动参数；关闭后仍保存编辑内容，但启动时不自动载入。")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("启动时自动刷新设备", isOn: $autoRefreshDevices)
+            HStack {
+                Text("当前版本：\(updateChecker.currentVersion)")
+                Spacer()
+                Button(updateChecker.isChecking ? "正在检查…" : "检查更新") {
+                    Task {
+                        await updateChecker.check()
+                        if !updateChecker.requiresUpdate {
+                            updateMessage = updateChecker.lastError.map { "无法连接 GitHub：\($0)" }
+                                ?? "当前已是最新版本（\(updateChecker.currentVersion)）。"
+                        }
+                    }
+                }
+                .disabled(updateChecker.isChecking)
+            }
             Divider()
             HStack {
                 Text("搜索历史：\(placeSearch.history.count) 条")
@@ -150,6 +186,29 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(width: 460)
+    }
+
+    private var updateRequiredView: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 42)).foregroundStyle(accent)
+            Text("需要更新 AnyWay").font(.title2.bold())
+            Text("发现新版本 \(updateChecker.latestVersion ?? "")（当前 \(updateChecker.currentVersion)）。请先下载安装最新版，再继续使用。")
+                .multilineTextAlignment(.center)
+            HStack {
+                Button("退出软件") { NSApp.terminate(nil) }
+                Button("打开新版下载页") {
+                    if let url = updateChecker.releaseURL { NSWorkspace.shared.open(url) }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(30)
+        .frame(width: 430)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .shadow(radius: 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black.opacity(0.4))
     }
 
     private var mapPanel: some View {

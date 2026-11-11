@@ -9,8 +9,6 @@ import random
 import sys
 import threading
 import time
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
@@ -25,6 +23,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .core import (Configuration, Coordinate, DynamicPlan, MotionProfile, RouteStepper,
                    closed, generate_track, pace_to_speed, parse_points, speed_to_pace)
 from .ios import PhoneSession, connected_devices
+from .place_search import USER_AGENT, nearby_sports, search_places
+from .update_check import UpdateResult, check_update
 from .android import AndroidBridge, connected_devices as connected_android_devices
 from .driver_check import (DriverReport, install_apple_devices,
                            probe as probe_ios_drivers)
@@ -35,7 +35,6 @@ from .harmony import (HarmonyBridge, configure_hdc,
 APP_DIR = Path(os.getenv("APPDATA") or Path.home() / ".config") / "WindowsLocationSimulator"
 SETTINGS = APP_DIR / "settings.json"
 DRAFT = APP_DIR / "draft.json"
-USER_AGENT = "WindowsLocationSimulator/0.1 (desktop location testing app)"
 RESEARCH_NOTICE = ("本软件仅用于研究学习 Apple Developer Toolkit 和 Android Debug Bridge，禁止用于作弊、造假等任何非法行为。"
                    "下载学习后请于 24 小时内删除本软件。使用者因不当使用造成的不良影响由本人自行承担，与开发者无关。")
 
@@ -56,6 +55,36 @@ class Task(QRunnable):
             self.signals.result.emit(self.fn())
         except Exception as exc:
             self.signals.error.emit(str(exc))
+
+
+class UpdateRequiredDialog(QDialog):
+    def __init__(self, parent, result: UpdateResult):
+        super().__init__(parent)
+        self.setWindowTitle("需要更新 AnyWay")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        layout = QVBoxLayout(self)
+        message = QLabel(f"发现新版本 {result.latest}（当前 {result.current}）。\n"
+                         "请先下载安装最新版，再继续使用。")
+        message.setWordWrap(True)
+        layout.addWidget(message)
+        download = QPushButton("打开新版下载页")
+        download.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(result.release_url)))
+        layout.addWidget(download)
+        quit_button = QPushButton("退出软件")
+        quit_button.clicked.connect(self._quit)
+        layout.addWidget(quit_button)
+        self.setMinimumWidth(370)
+
+    def _quit(self):
+        self.accept()
+        QApplication.instance().quit()
+
+    def reject(self):
+        pass
+
+    def closeEvent(self, event):
+        event.ignore()
 
 
 class MapBridge(QObject):
@@ -131,53 +160,6 @@ class RouteRunner(QRunnable):
             self.signals.finished.emit()
 
 
-def search_places(query: str) -> list[dict]:
-    query = query.strip()
-    if query.startswith("浙大"):
-        query = "浙江大学" + query[2:]
-    if query.startswith("北邮"):
-        query = "北京邮电大学" + query[2:]
-    if "".join(query.split()).replace("（", "").replace("）", "") == "北京邮电大学沙河校区":
-        return [{"name": "北京邮电大学（沙河校区）", "subtitle": "OpenStreetMap way 685054417",
-                 "point": Coordinate(40.15608, 116.28333), "school": True}]
-    url = "https://nominatim.openstreetmap.org/search?" + urlencode({
-        "q": query, "format": "jsonv2", "limit": 8, "accept-language": "zh-CN"})
-    with urlopen(Request(url, headers={"User-Agent": USER_AGENT}), timeout=15) as response:
-        records = json.load(response)
-    places = []
-    for item in records:
-        point = Coordinate(float(item["lat"]), float(item["lon"]))
-        name = item.get("name") or item.get("display_name", "未命名地点").split(",")[0]
-        category = item.get("category", "")
-        school = category == "amenity" and item.get("type") in ("school", "university", "college")
-        places.append({"name": name, "subtitle": item.get("display_name", ""),
-                       "point": point, "school": school})
-    return places
-
-
-def nearby_sports(school: Coordinate) -> list[dict]:
-    # One bounded query rather than repeated searches; executed only for a selected school.
-    query = f'[out:json][timeout:20];(nwr(around:3000,{school.latitude},{school.longitude})[leisure~"^(pitch|sports_centre|stadium|track|fitness_centre|swimming_pool)$"];nwr(around:3000,{school.latitude},{school.longitude})[sport~"^(basketball|soccer|tennis|badminton|swimming|running)$"];);out center 40;'
-    with urlopen(Request("https://overpass-api.de/api/interpreter", data=query.encode(),
-                         headers={"User-Agent": USER_AGENT}), timeout=30) as response:
-        records = json.load(response)["elements"]
-    found = []
-    for item in records:
-        tags = item.get("tags", {})
-        center = item.get("center", item)
-        if "lat" not in center or "lon" not in center:
-            continue
-        point = Coordinate(float(center["lat"]), float(center["lon"]))
-        if point.distance(school) > 3000:
-            continue
-        name = tags.get("name:zh") or tags.get("name") or tags.get("sport") or tags.get("leisure", "运动场")
-        if any(p["name"] == name and p["point"].distance(point) < 80 for p in found):
-            continue
-        found.append({"name": name, "subtitle": f"距离 {point.distance(school):.0f} 米 · OpenStreetMap",
-                      "point": point, "school": False})
-    return sorted(found, key=lambda p: p["point"].distance(school))[:30]
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -206,6 +188,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._show_research_notice)
         if self.settings.get("auto_refresh", True):
             QTimer.singleShot(200, self.refresh_devices)
+        QTimer.singleShot(300, self.check_for_updates)
 
     @staticmethod
     def _read_json(path, fallback):
@@ -865,6 +848,7 @@ class MainWindow(QMainWindow):
 
     def show_settings(self):
         dialog = QDialog(self)
+        self.settings_dialog = dialog
         dialog.setWindowTitle("设置")
         layout = QVBoxLayout(dialog)
         restore = QCheckBox("启动时恢复上次路线")
@@ -873,12 +857,45 @@ class MainWindow(QMainWindow):
         auto.setChecked(self.settings.get("auto_refresh", True))
         layout.addWidget(restore)
         layout.addWidget(auto)
+        self._button("检查更新", lambda: self.check_for_updates(manual=True), layout)
         self._button("清除搜索历史", lambda: self.settings.update(history=[]), layout)
         self._button("清除路线记忆", self._clear_draft, layout)
         self._button("完成", dialog.accept, layout)
         dialog.exec()
+        self.settings_dialog = None
         self.settings.update(restore=restore.isChecked(), auto_refresh=auto.isChecked())
         self._write_json(SETTINGS, self.settings)
+
+    def check_for_updates(self, manual=False):
+        if getattr(self, "_update_check_running", False):
+            return
+        self._update_check_running = True
+        task = Task(check_update)
+        task.signals.result.connect(lambda result: self._update_checked(result, manual))
+        task.signals.error.connect(self._update_check_failed)
+        if manual:
+            self.status.setText("正在检查更新…")
+        self.pool.start(task)
+
+    def _update_checked(self, result: UpdateResult, manual: bool):
+        self._update_check_running = False
+        if result.required:
+            if getattr(self, "settings_dialog", None):
+                self.settings_dialog.accept()
+            if self.runner:
+                self.stop_route()
+            self.centralWidget().setEnabled(False)
+            self.update_dialog = UpdateRequiredDialog(self, result)
+            self.update_dialog.exec()
+        elif manual:
+            if result.error:
+                QMessageBox.information(self, "检查更新", f"无法连接 GitHub：{result.error}")
+            else:
+                QMessageBox.information(self, "检查更新", f"当前已是最新版本（{result.current}）。")
+
+    def _update_check_failed(self, message):
+        self._update_check_running = False
+        self.status.setText(f"检查更新失败：{message}")
 
     def _clear_draft(self):
         self._cleared_draft_snapshot = self._draft_data()

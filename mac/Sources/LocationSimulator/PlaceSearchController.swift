@@ -51,6 +51,18 @@ enum SchoolSearchRules {
         }
         return trimmed
     }
+
+    static func normalizedName(_ name: String) -> String {
+        name.filter { !$0.isWhitespace && !"（）()·-".contains($0) }.lowercased()
+    }
+
+    static func isCampus(_ name: String, of schoolName: String) -> Bool {
+        let root = normalizedName(schoolName)
+        let candidate = normalizedName(name)
+        guard candidate.hasPrefix(root), candidate != root else { return false }
+        let suffix = candidate.dropFirst(root.count)
+        return suffix.contains("校区") || suffix.contains("分校") || suffix.contains("校本部")
+    }
 }
 
 struct PlaceResult: Identifiable {
@@ -81,6 +93,27 @@ struct PlaceResult: Identifiable {
         return PlaceResult(name: "北京邮电大学（沙河校区）",
                            subtitle: "北京市昌平区南丰路1号 · OpenStreetMap",
                            coordinate: coordinate, isSchool: true)
+    }
+
+    static func campuses(of school: PlaceResult, rootName: String,
+                         among candidates: [PlaceResult]) -> [PlaceResult] {
+        var matches = candidates.filter {
+            $0.isSchool && SchoolSearchRules.isCampus($0.name, of: rootName)
+                && $0.coordinate.distance(to: school.coordinate) >= 80
+        }
+        if SchoolSearchRules.normalizedName(rootName) == "北京邮电大学",
+           let known = knownCampus(matching: "北京邮电大学沙河校区") {
+            matches.append(known)
+        }
+        var unique: [PlaceResult] = []
+        for candidate in matches {
+            if candidate.coordinate.distance(to: school.coordinate) < 80
+                || unique.contains(where: { $0.coordinate.distance(to: candidate.coordinate) < 80 }) {
+                continue
+            }
+            unique.append(candidate)
+        }
+        return unique
     }
 
     init?(mapItem: MKMapItem) {
@@ -173,11 +206,14 @@ final class PlaceSearchController: ObservableObject {
                     return
                 }
                 let containsSchoolTerm = SchoolSearchRules.isSchool(name: expanded)
-                let school = (containsSchoolTerm ? found.first(where: { $0.isSchool }) : nil)
+                let school = (containsSchoolTerm ? found.first(where: {
+                    $0.isSchool && SchoolSearchRules.normalizedName($0.name)
+                        == SchoolSearchRules.normalizedName(expanded)
+                }) ?? found.first(where: { $0.isSchool }) : nil)
                     ?? (found.first?.isSchool == true ? found.first : nil)
                 if !SchoolSearchRules.isSportsGround(name: searchText), let school {
-                    results = [school]
-                    await searchGrounds(near: school, request: request)
+                    await searchSchool(school, rootName: expanded,
+                                       initialResults: found, request: request)
                 } else {
                     results = Array(found.prefix(8))
                     selectWithoutRefinement(results[0])
@@ -202,7 +238,9 @@ final class PlaceSearchController: ObservableObject {
         requestNumber += 1
         let request = requestNumber
         isSearching = true
-        Task { await searchGrounds(near: result, request: request) }
+        let schoolResults = results.filter(\.isSchool)
+        Task { await searchGrounds(near: result, request: request,
+                                   schoolResults: schoolResults) }
     }
 
     func searchHistoryItem(_ item: String) {
@@ -230,7 +268,28 @@ final class PlaceSearchController: ObservableObject {
         focusRevision += 1
     }
 
-    private func searchGrounds(near school: PlaceResult, request: Int) async {
+    private func searchSchool(_ school: PlaceResult, rootName: String,
+                              initialResults: [PlaceResult],
+                              request: Int) async {
+        let initialCampuses = PlaceResult.campuses(of: school, rootName: rootName,
+                                                   among: initialResults)
+        results = [school] + initialCampuses
+        selectWithoutRefinement(school)
+        message = "正在查找校区与附近运动场地…"
+        var campuses = initialCampuses
+        if !rootName.contains("校区") && !rootName.contains("分校") {
+            let items = (try? await searchItems(query: "\(rootName) 校区")) ?? []
+            guard request == requestNumber else { return }
+            campuses = PlaceResult.campuses(of: school, rootName: rootName,
+                among: initialCampuses + items.compactMap(PlaceResult.init(mapItem:)))
+            results = [school] + campuses
+        }
+        await searchGrounds(near: school, request: request,
+                            schoolResults: [school] + campuses)
+    }
+
+    private func searchGrounds(near school: PlaceResult, request: Int,
+                               schoolResults: [PlaceResult]? = nil) async {
         selectWithoutRefinement(school)
         message = "已识别为学校，正在搜索附近的运动场地…"
         let latitude = school.coordinate.latitude
@@ -263,7 +322,7 @@ final class PlaceSearchController: ObservableObject {
         items += (try? await fitness) ?? []
         guard request == requestNumber else { return }
         let grounds = nearbyGrounds(items, school: school)
-        results = [school] + grounds
+        results = (schoolResults ?? [school]) + grounds
         isSearching = false
         message = grounds.isEmpty
             ? "已识别为学校，附近没有找到运动场地。"

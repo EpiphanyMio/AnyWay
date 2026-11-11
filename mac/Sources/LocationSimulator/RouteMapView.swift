@@ -6,6 +6,26 @@ final class RoutePointAnnotation: MKPointAnnotation { var index = 0 }
 final class SearchPointAnnotation: MKPointAnnotation {}
 final class SinglePointAnnotation: MKPointAnnotation {}
 
+/// MapKit asks a custom annotation view to complete each drag-state transition.
+final class RouteMarkerView: MKMarkerAnnotationView {
+    var onDragFinished: ((RoutePointAnnotation) -> Void)?
+
+    override func setDragState(_ newDragState: MKAnnotationView.DragState, animated: Bool) {
+        switch newDragState {
+        case .starting:
+            super.setDragState(.dragging, animated: animated)
+        case .ending:
+            let point = annotation as? RoutePointAnnotation
+            super.setDragState(.none, animated: animated)
+            if let point { onDragFinished?(point) }
+        case .canceling:
+            super.setDragState(.none, animated: animated)
+        default:
+            super.setDragState(newDragState, animated: animated)
+        }
+    }
+}
+
 struct RouteMapView: NSViewRepresentable {
     let points: [Coordinate]
     let previewRoute: [Coordinate]
@@ -218,16 +238,12 @@ struct RouteMapView: NSViewRepresentable {
             return renderer
         }
 
-        func mapView(_ mapView: MKMapView, annotationView view: MKAnnotationView,
-                     didChange newState: MKAnnotationView.DragState,
-                     fromOldState oldState: MKAnnotationView.DragState) {
-            guard newState == .ending, parent.editable,
-                  let annotation = view.annotation as? RoutePointAnnotation,
-                  annotation.index < parent.points.count,
+        private func finishDrag(_ annotation: RoutePointAnnotation) {
+            guard parent.editable, annotation.index < parent.points.count,
                   let point = try? Coordinate(latitude: annotation.coordinate.latitude,
-                                              longitude: annotation.coordinate.longitude) else { return }
+                                              longitude: annotation.coordinate.longitude),
+                  parent.points[annotation.index] != point else { return }
             parent.onPointMoved(annotation.index, point)
-            view.dragState = .none
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -236,8 +252,16 @@ struct RouteMapView: NSViewRepresentable {
             let isSearch = annotation is SearchPointAnnotation
             let isSinglePoint = annotation is SinglePointAnnotation
             let identifier = isSearch ? "SearchPoint" : (isSinglePoint ? "SinglePoint" : "RoutePoint")
-            let view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
-                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            let view: MKMarkerAnnotationView
+            if annotation is RoutePointAnnotation {
+                let routeView = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? RouteMarkerView)
+                    ?? RouteMarkerView(annotation: annotation, reuseIdentifier: identifier)
+                routeView.onDragFinished = { [weak self] point in self?.finishDrag(point) }
+                view = routeView
+            } else {
+                view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
+                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
+            }
             view.annotation = annotation
             view.markerTintColor = isSearch ? .systemOrange : (isSinglePoint ? .systemPurple : .systemTeal)
             view.glyphText = isSearch ? "⌕" : (isSinglePoint ? "◎" : (annotation.title ?? "•"))

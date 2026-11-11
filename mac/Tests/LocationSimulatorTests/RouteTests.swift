@@ -1,7 +1,31 @@
+import MapKit
 import XCTest
 @testable import LocationSimulator
 
 final class RouteTests: XCTestCase {
+    func testReleaseVersionOrdersNumericComponents() {
+        XCTAssertTrue(ReleaseVersion("v0.1.10")! > ReleaseVersion("0.1.9")!)
+        XCTAssertNil(ReleaseVersion("v0.1.1-beta"))
+        XCTAssertNil(ReleaseVersion("0.1"))
+    }
+
+    func testRouteMarkerCompletesDragAndReportsNewCoordinate() {
+        let annotation = RoutePointAnnotation()
+        annotation.index = 2
+        annotation.coordinate = CLLocationCoordinate2D(latitude: 39.9, longitude: 116.4)
+        let marker = RouteMarkerView(annotation: annotation, reuseIdentifier: "RoutePoint")
+        var moved: RoutePointAnnotation?
+        marker.onDragFinished = { moved = $0 }
+        marker.setDragState(.starting, animated: false)
+        XCTAssertEqual(marker.dragState, .dragging)
+        annotation.coordinate = CLLocationCoordinate2D(latitude: 40.0, longitude: 116.5)
+        marker.setDragState(.ending, animated: false)
+        XCTAssertEqual(marker.dragState, .none)
+        XCTAssertEqual(moved?.index, 2)
+        XCTAssertEqual(moved?.coordinate.latitude, 40.0)
+        XCTAssertEqual(moved?.coordinate.longitude, 116.5)
+    }
+
     func testParserReportsLineAndRejectsOutOfRangeCoordinate() throws {
         XCTAssertThrowsError(try RouteParser.parse("39.9,116.4\n91,116.5")) { error in
             guard case RouteError.invalidLine(2) = error else {
@@ -183,6 +207,10 @@ final class RouteTests: XCTestCase {
         XCTAssertEqual(SchoolSearchRules.expandedQuery("浙大"), "浙江大学")
         XCTAssertEqual(SchoolSearchRules.expandedQuery("北邮沙河校区"), "北京邮电大学沙河校区")
         XCTAssertEqual(SchoolSearchRules.expandedQuery("上海大学"), "上海大学")
+        XCTAssertTrue(SchoolSearchRules.isCampus("北京邮电大学（沙河校区）", of: "北京邮电大学"))
+        XCTAssertTrue(SchoolSearchRules.isCampus("北京大学昌平分校", of: "北京大学"))
+        XCTAssertFalse(SchoolSearchRules.isCampus("北京大学", of: "北京大学"))
+        XCTAssertFalse(SchoolSearchRules.isCampus("清华大学沙河校区", of: "北京大学"))
         let campus = PlaceResult.knownCampus(matching: "北京邮电大学沙河校区")
         XCTAssertEqual(campus?.name, "北京邮电大学（沙河校区）")
         XCTAssertEqual(campus?.coordinate.latitude, 40.15608)

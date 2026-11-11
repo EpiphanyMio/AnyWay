@@ -17,6 +17,7 @@ $env:PATH = $filteredPath -join ';'
   --runtime-hook scripts\pyi_rth_qt_dll.py `
   --collect-all pymobiledevice3 --collect-all pytun_pmd3 --collect-all PySide6.QtWebEngineCore `
   --add-data "winloc\map.html;winloc" --add-data "winloc\qwebchannel.js;winloc" `
+  --add-data "..\VERSION;." `
   --add-data "winloc\vendor;winloc\vendor" --add-data "winloc\iphone_bridge.py;winloc" `
   --paths . launcher.py
 Write-Host "已生成 dist\WindowsLocationSimulator\WindowsLocationSimulator.exe"

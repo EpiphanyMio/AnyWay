@@ -3,7 +3,11 @@ name: AnyWay release
 on:
   push:
     branches: [main]
-    paths: [VERSION]
+    paths:
+      - VERSION
+      - mac/**
+      - windows/**
+      - .github/workflows/release.yml
 
 permissions:
   contents: write
@@ -120,7 +124,16 @@ jobs:
           test -f "release-assets/AnyWay-$(cat VERSION)-Windows-Setup.exe"
           test -f "release-assets/AnyWay-$(cat VERSION)-macOS-Android.apk"
           test -f "release-assets/AnyWay-$(cat VERSION)-Windows-Android.apk"
-          gh release create "v$(cat VERSION)" release-assets/* \
-            --target "$GITHUB_SHA" \
-            --title "AnyWay $(cat VERSION)" \
-            --notes-file windows/RELEASE-NOTES.md
+          tag="v$(cat VERSION)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* --clobber
+            gh release edit "$tag" --target "$GITHUB_SHA" \
+              --title "AnyWay $(cat VERSION)" --notes-file windows/RELEASE-NOTES.md
+            git tag -f "$tag" "$GITHUB_SHA"
+            git push --force origin "refs/tags/$tag"
+          else
+            gh release create "$tag" release-assets/* \
+              --target "$GITHUB_SHA" \
+              --title "AnyWay $(cat VERSION)" \
+              --notes-file windows/RELEASE-NOTES.md
+          fi

@@ -33,7 +33,7 @@ enum DynamicSpeedPreset: String, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .campus: "校园跑"
+        case .campus: "间歇慢跑"
         case .easy: "轻松跑"
         case .endurance: "耐力跑"
         }

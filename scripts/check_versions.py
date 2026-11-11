@@ -6,10 +6,11 @@ root = Path(__file__).resolve().parents[1]
 version = (root / "VERSION").read_text(encoding="utf-8").strip()
 assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
 checks = {
-    "mac/scripts/build-app.sh": ("cat ../VERSION", "<string>$version</string>"),
+    "mac/scripts/build-app.sh": ("cat ../VERSION", "<key>CFBundleShortVersionString</key><string>$version</string>",
+                                 "<key>CFBundleVersion</key><string>$version</string>"),
     "mac/scripts/build-pkg.sh": ("AnyWay-$version-arm64.pkg",),
-    "mac/android/app/build.gradle": ("../../VERSION",),
-    "windows/android-companion/app/build.gradle.kts": ("../../VERSION",),
+    "mac/android/app/build.gradle": ("../../VERSION", "versionCode (versionParts[0]", "versionName productVersion"),
+    "windows/android-companion/app/build.gradle.kts": ("../../VERSION", "versionCode = versionParts[0]", "versionName = productVersion"),
     "windows/packaging/windows.iss": (f'#define AppVersion "{version}"', "AnyWay-{#AppVersion}-Windows-Setup"),
 }
 for path, markers in checks.items():

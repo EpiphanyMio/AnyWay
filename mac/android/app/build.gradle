@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+def productVersion = new File(rootDir, '../../VERSION').text.trim()
+def versionParts = productVersion.tokenize('.').collect { it.toInteger() }
+
 android {
     namespace 'com.locationsimulator.mock'
     compileSdk 35
@@ -10,7 +13,7 @@ android {
         applicationId 'com.locationsimulator.mock'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName new File(rootDir, '../../VERSION').text.trim()
+        versionCode (versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2])
+        versionName productVersion
     }
 }

@@ -1,13 +1,13 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>__LEAFLET_CSS__</style>
-<style>html,body,#map{height:100%;margin:0}#notice{position:absolute;z-index:1000;bottom:10px;left:10px;background:white;padding:5px;font:12px sans-serif;border-radius:4px}</style>
+<style>html,body,#map{height:100%;margin:0;background:#edf2f4}#notice{position:absolute;z-index:1000;bottom:12px;left:12px;background:rgba(255,255,255,.95);padding:8px 11px;font:12px sans-serif;border:1px solid #dce5eb;border-radius:8px;box-shadow:0 2px 9px #233f4d18}</style>
 </head><body><div id="map"></div><div id="notice">© OpenStreetMap contributors</div>
 <script>__QWEBCHANNEL_JS__</script>
 <script>__LEAFLET_JS__</script>
 <script>
 let map, routeLayer, pointLayer, singleLayer, searchLayer, bridge, routePolyline;
-let activeDrag=null, suppressClickUntil=0;
+let activeDrag=null, suppressClickUntil=0, tileFailed=false;
 const notice=document.getElementById('notice');
 if (typeof QWebChannel === 'function' && window.qt && qt.webChannelTransport) {
   new QWebChannel(qt.webChannelTransport, channel => { bridge = channel.objects.bridge; });
@@ -18,8 +18,8 @@ function init() {
   if (!window.L) {notice.textContent='地图组件加载失败，请重新安装程序。';return;}
   map=L.map('map').setView([39.9042,116.4074],14);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19,attribution:'© OpenStreetMap contributors'})
-    .on('tileerror', () => { notice.textContent='地图底图加载失败，请检查网络或代理。'; })
-    .on('tileload', () => { notice.textContent='© OpenStreetMap contributors'; })
+    .on('tileerror', () => { tileFailed=true; notice.textContent='地图加载失败：本软件接入境外 OpenStreetMap 地图服务，中国大陆暂不可用。'; })
+    .on('tileload', () => { if (!tileFailed) notice.textContent='© OpenStreetMap contributors'; })
     .addTo(map);
   routeLayer=L.layerGroup().addTo(map);pointLayer=L.layerGroup().addTo(map);
   map.on('click', e => {if(bridge&&Date.now()>suppressClickUntil) bridge.mapClicked(e.latlng.lat,e.latlng.lng);});

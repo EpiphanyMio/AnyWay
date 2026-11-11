@@ -1,13 +1,11 @@
-# WinLS 0.1.0
+# AnyWay 0.1.1
 
-Windows 定位模拟器正式版。支持 iOS 17+、Android 与 HarmonyOS 7+ 实体设备的开发者模拟定位。
+Mac 与 Windows 桌面版统一版本，另附两份与各自桌面端配套的 Android APK。本版新增首次打开使用须知和主页警示，调整运动方案名称，并优化 Windows 界面的信息层级与操作区。
 
-- 跑道模板改为约 400 米，并限制所选长直边短于 200 米。
-- 已绘制的路径点可在地图上拖动调整，坐标文本和路线草稿会同步更新。
-- 自动查找常见 HarmonyOS SDK 路径中的 `hdc`；缺失时提供华为官方工具安装入口。
-- 支持单点定位、路线回放、地图选点与搜索、配置导入导出。
+- Windows 地图底图加载失败时，提示 OpenStreetMap 服务在中国大陆暂不可用。
+- HarmonyOS 工具提示仅在检测到已接入华为 USB 设备且缺少 `hdc` 时出现。
+- iOS 驱动仅在点击检测按钮后检查；缺失时可一键安装 Apple 官方 Apple Devices，无需安装完整 iTunes。
 
-下载 `WinLS-0.1.0-Windows-Setup.exe` 安装。iPhone 需 Apple Mobile Device Support；Android 需 ADB Platform-Tools 和配套 APK；HarmonyOS 7+ 需华为 SDK 中的 `hdc`。设备连接步骤见 README。
+使用须知：仅供研究学习 Apple Developer Toolkit 与 Android Debug Bridge，不得用于作弊、造假或其他非法用途；下载学习后请于 24 小时内删除。使用者自行承担不当使用造成的后果。
 
-首次正式发布。HarmonyOS 实体设备尚未完成端到端验证。安装程序未签名。
-
+Windows 安装程序未签名；HarmonyOS 和 iPhone 实体设备的全部组合仍需在目标设备上验证。

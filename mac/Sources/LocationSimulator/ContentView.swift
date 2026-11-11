@@ -7,6 +7,8 @@ struct ContentView: View {
     @StateObject private var placeSearch = PlaceSearchController()
     @AppStorage("restoreLastRoute") private var restoreLastRoute = true
     @AppStorage("autoRefreshDevices") private var autoRefreshDevices = true
+    @AppStorage("hasAcknowledgedResearchNotice") private var hasAcknowledgedResearchNotice = false
+    @State private var showingResearchNotice = false
     @State private var name = "我的路线"
     @State private var latitude = "39.9042"
     @State private var longitude = "116.4074"
@@ -47,13 +49,18 @@ struct ContentView: View {
             }
             .padding(20)
             Divider()
-            HStack(spacing: 9) {
-                Image(systemName: controller.isRunning ? "location.fill" : "info.circle.fill")
-                    .foregroundStyle(accent)
-                Text(controller.status)
-                    .lineLimit(2)
-                    .textSelection(.enabled)
-                Spacer()
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 9) {
+                    Image(systemName: controller.isRunning ? "location.fill" : "info.circle.fill")
+                        .foregroundStyle(accent)
+                    Text(controller.status)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                    Spacer()
+                }
+                Text("仅供开发工具研究学习；请勿用于作弊、造假或其他违法用途。使用后请于 24 小时内删除，使用者自行承担不当使用的后果。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .font(.callout)
             .padding(.horizontal, 22)
@@ -61,6 +68,7 @@ struct ContentView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
+            if !hasAcknowledgedResearchNotice { showingResearchNotice = true }
             if !hasLoadedDraft { restoreDraftIfNeeded() }
             if autoRefreshDevices { controller.refresh() }
         }
@@ -69,6 +77,11 @@ struct ContentView: View {
             if RouteDraftStore().save(draft) { hasSavedDraft = true }
         }
         .sheet(isPresented: $showingSettings) { settingsSheet }
+        .alert("使用须知", isPresented: $showingResearchNotice) {
+            Button("我已知悉") { hasAcknowledgedResearchNotice = true }
+        } message: {
+            Text("本软件仅用于研究学习 Apple Developer Toolkit 和 Android Debug Bridge，禁止用于作弊、造假等任何非法行为。下载学习后请于 24 小时内删除本软件。使用者因不当使用造成的不良影响由本人自行承担，与开发者无关。")
+        }
     }
 
     private var header: some View {

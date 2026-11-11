@@ -26,14 +26,18 @@ from .core import (Configuration, Coordinate, DynamicPlan, MotionProfile, RouteS
                    closed, generate_track, pace_to_speed, parse_points, speed_to_pace)
 from .ios import PhoneSession, connected_devices
 from .android import AndroidBridge, connected_devices as connected_android_devices
-from .driver_check import DriverReport, probe as probe_ios_drivers
+from .driver_check import (DriverReport, install_apple_devices,
+                           probe as probe_ios_drivers)
 from .harmony import (HarmonyBridge, configure_hdc,
-                      connected_devices as connected_harmony_devices)
+                      connected_devices as connected_harmony_devices,
+                      harmony_usb_connected)
 
 APP_DIR = Path(os.getenv("APPDATA") or Path.home() / ".config") / "WindowsLocationSimulator"
 SETTINGS = APP_DIR / "settings.json"
 DRAFT = APP_DIR / "draft.json"
 USER_AGENT = "WindowsLocationSimulator/0.1 (desktop location testing app)"
+RESEARCH_NOTICE = ("本软件仅用于研究学习 Apple Developer Toolkit 和 Android Debug Bridge，禁止用于作弊、造假等任何非法行为。"
+                   "下载学习后请于 24 小时内删除本软件。使用者因不当使用造成的不良影响由本人自行承担，与开发者无关。")
 
 
 class TaskSignals(QObject):
@@ -193,10 +197,13 @@ class MainWindow(QMainWindow):
         self.groups = []
         self.settings = self._read_json(SETTINGS, {"restore": True, "auto_refresh": True, "history": []})
         self._build_ui()
+        self._apply_style()
         self._load_draft()
         self.draft_timer = QTimer(self)
         self.draft_timer.timeout.connect(self._save_draft)
         self.draft_timer.start(2000)
+        if not self.settings.get("research_notice_acknowledged", False):
+            QTimer.singleShot(0, self._show_research_notice)
         if self.settings.get("auto_refresh", True):
             QTimer.singleShot(200, self.refresh_devices)
 
@@ -227,10 +234,18 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         root = QWidget()
+        root.setObjectName("centralRoot")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
+        outer.setContentsMargins(18, 16, 18, 12)
+        outer.setSpacing(12)
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("AnyWay · Windows"))
+        title = QLabel("AnyWay")
+        title.setObjectName("appTitle")
+        toolbar.addWidget(title)
+        subtitle = QLabel("位置模拟工作台")
+        subtitle.setObjectName("appSubtitle")
+        toolbar.addWidget(subtitle)
         toolbar.addStretch()
         self._button("设置", self.show_settings, toolbar)
         self.import_button = self._button("导入配置", self.import_config, toolbar)
@@ -258,6 +273,7 @@ class MainWindow(QMainWindow):
         result_row.addStretch()
         left_layout.addLayout(result_row)
         self.map = QWebEngineView()
+        self.map.setObjectName("mapCanvas")
         self.map.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         self.map.page().profile().setHttpUserAgent(USER_AGENT)
         self.bridge = MapBridge()
@@ -288,9 +304,9 @@ class MainWindow(QMainWindow):
         sidebar = QWidget()
         side = QVBoxLayout(sidebar)
         scroll.setWidget(sidebar)
-        scroll.setMinimumWidth(340)
+        scroll.setMinimumWidth(360)
         splitter.addWidget(scroll)
-        splitter.setSizes([850, 380])
+        splitter.setSizes([830, 400])
 
         devices = self._box("目标设备", side)
         row = QHBoxLayout()
@@ -306,6 +322,8 @@ class MainWindow(QMainWindow):
         self.driver_guide.setWordWrap(True)
         self.driver_guide.hide()
         devices.addWidget(self.driver_guide)
+        self.repair_button = self._button("一键补全 iOS 驱动", self.repair_ios_drivers, devices)
+        self.repair_button.hide()
 
         single = self._box("单点定位", side)
         self.pick_point = QCheckBox("在地图上选点")
@@ -388,7 +406,7 @@ class MainWindow(QMainWindow):
         self.dynamic_mode.addItem("自定义", "custom")
         params.addWidget(self.dynamic_mode)
         self.preset = QComboBox()
-        for name, key in (("校园跑", "campus"), ("轻松跑", "easy"), ("耐力跑", "endurance")):
+        for name, key in (("间歇慢跑", "campus"), ("轻松跑", "easy"), ("耐力跑", "endurance")):
             self.preset.addItem(name, key)
         params.addWidget(self.preset)
         custom = QFormLayout()
@@ -410,13 +428,51 @@ class MainWindow(QMainWindow):
 
         run = QHBoxLayout()
         self.start_button = self._button("开始模拟", self.start_route, run)
+        self.start_button.setObjectName("primaryButton")
         self.stop_button = self._button("停止", self.stop_route, run)
         self.stop_button.setEnabled(False)
         side.addLayout(run)
         side.addStretch()
         self.status = QLabel("连接设备后点击刷新。")
+        self.status.setObjectName("statusLabel")
         self.status.setWordWrap(True)
         outer.addWidget(self.status)
+        notice = QLabel("仅供开发工具研究学习；请勿用于作弊、造假或其他违法用途。使用后请于 24 小时内删除，使用者自行承担不当使用的后果。")
+        notice.setObjectName("noticeLabel")
+        notice.setWordWrap(True)
+        outer.addWidget(notice)
+
+    def _apply_style(self):
+        self.setStyleSheet("""
+            QMainWindow, QWidget#centralRoot { background: #f5f7fa; color: #1c2938; font-size: 13px; }
+            QLabel#appTitle { font-size: 25px; font-weight: 700; color: #102d3b; }
+            QLabel#appSubtitle { color: #677989; margin-left: 8px; }
+            QGroupBox { background: #ffffff; border: 1px solid #dce5eb; border-radius: 12px;
+                        margin-top: 12px; padding: 14px 12px 12px; font-weight: 600; }
+            QGroupBox::title { subcontrol-origin: margin; left: 15px; padding: 0 5px; color: #31516a; }
+            QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QListWidget {
+                background: #ffffff; border: 1px solid #cad6df; border-radius: 7px;
+                padding: 5px 7px; selection-background-color: #c8ece8; }
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus { border: 1px solid #087f77; }
+            QPushButton { background: #ffffff; border: 1px solid #cad6df; border-radius: 7px;
+                          padding: 7px 11px; font-weight: 500; }
+            QPushButton:hover { background: #e9f5f3; border-color: #78b8ae; }
+            QPushButton:disabled { color: #9daab4; background: #f5f7fa; }
+            QPushButton#primaryButton { background: #087f77; color: white; border-color: #087f77;
+                                        font-weight: 600; }
+            QPushButton#primaryButton:hover { background: #076e67; }
+            QScrollArea { border: 0; background: transparent; }
+            QTabWidget::pane { border: 1px solid #dce5eb; border-radius: 7px; }
+            QTabBar::tab { padding: 6px 10px; background: #edf2f5; border-radius: 5px; }
+            QTabBar::tab:selected { background: #d9f1ed; color: #075b55; }
+            QLabel#statusLabel { background: #e8f2f4; border-radius: 8px; padding: 9px 12px; }
+            QLabel#noticeLabel { color: #657582; font-size: 11px; }
+        """)
+
+    def _show_research_notice(self):
+        QMessageBox.warning(self, "使用须知", RESEARCH_NOTICE, QMessageBox.Ok)
+        self.settings["research_notice_acknowledged"] = True
+        self._write_json(SETTINGS, self.settings)
 
     def _task(self, fn, done, busy_text):
         self.status.setText(busy_text)
@@ -429,6 +485,8 @@ class MainWindow(QMainWindow):
         self.map_ready = ok
         if ok:
             self.draw_map(True)
+        else:
+            self.status.setText("地图加载失败：本软件接入境外 OpenStreetMap 地图服务，中国大陆暂不可用。")
 
     def _js(self, function, *args):
         if self.map_ready:
@@ -602,20 +660,24 @@ class MainWindow(QMainWindow):
     def refresh_devices(self):
         def discover():
             found, errors = [], []
+            harmony_attached = False
             for kind, lookup in (("ios", connected_devices), ("android", connected_android_devices),
                                  ("harmony", connected_harmony_devices)):
                 try:
                     if kind == "harmony":
-                        configure_hdc()
+                        if not configure_hdc():
+                            harmony_attached = harmony_usb_connected()
+                            if harmony_attached:
+                                errors.append("已接入华为 USB 设备，但未找到 hdc。")
+                            continue
                     found.extend((kind, identifier) for identifier in lookup())
                 except RuntimeError as exc:
                     errors.append(str(exc))
-            report = probe_ios_drivers() if not any(kind == "ios" for kind, _ in found) else None
-            return found, errors, report
+            return found, errors, harmony_attached
         self._task(discover, self._set_devices, "正在查找 iPhone、Android 和 HarmonyOS 设备…")
 
     def _set_devices(self, result):
-        devices, errors, report = result
+        devices, errors, harmony_attached = result
         previous = self.device_combo.currentData()
         self.device_combo.clear()
         for kind, identifier in devices:
@@ -628,7 +690,7 @@ class MainWindow(QMainWindow):
             self.device_combo.setCurrentIndex(index)
         self.status.setText((f"找到 {len(devices)} 台设备。" if devices else "未找到设备。")
                             + (" " + "；".join(errors) if errors and not devices else ""))
-        if any("未找到 hdc" in error for error in errors):
+        if harmony_attached:
             answer = QMessageBox.question(
                 self, "安装 HarmonyOS 设备工具",
                 "未检测到 HarmonyOS SDK/hdc。是否打开华为官方 Command Line Tools 下载与安装说明？\n\n"
@@ -637,12 +699,6 @@ class MainWindow(QMainWindow):
             if answer == QMessageBox.Yes:
                 QDesktopServices.openUrl(QUrl(
                     "https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-commandline-get"))
-        if report and report.apple_usb_connected:
-            self.driver_guide.setText(report.guide_html())
-            self.driver_guide.show()
-            self.status.setText(self.status.text() + " " + report.summary())
-        else:
-            self.driver_guide.hide()
 
     def check_ios_drivers(self):
         self._task(probe_ios_drivers, self._show_driver_diagnosis, "正在检查 iOS 驱动…")
@@ -650,7 +706,25 @@ class MainWindow(QMainWindow):
     def _show_driver_diagnosis(self, report: DriverReport):
         self.driver_guide.setText(report.guide_html())
         self.driver_guide.show()
+        self.repair_button.setVisible(report.windows and any(
+            item in report.missing for item in
+            ("Apple Mobile Device Service", "Apple Mobile Device USB Driver")))
         self.status.setText(report.summary())
+
+    def repair_ios_drivers(self):
+        self.repair_button.setEnabled(False)
+        def finished(message):
+            self.repair_button.setEnabled(True)
+            self.status.setText(message)
+            self.check_ios_drivers()
+        def failed(message):
+            self.repair_button.setEnabled(True)
+            self.status.setText(message)
+        task = Task(install_apple_devices)
+        task.signals.result.connect(finished)
+        task.signals.error.connect(failed)
+        self.status.setText("正在安装 Apple Devices 所需设备组件…")
+        self.pool.start(task)
 
     def _target(self):
         target = self.device_combo.currentData()

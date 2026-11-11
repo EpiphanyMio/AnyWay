@@ -1,14 +1,15 @@
-"""Read-only Windows checks for iPhone USB support and repair guidance."""
+"""Windows checks for iPhone USB support and official repair guidance."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+import shutil
 import subprocess
 import sys
 
 APPLE_HELP_URL = "https://support.apple.com/en-us/108643"
 APPLE_DEVICES_URL = "https://apps.microsoft.com/detail/9np83lwlpz9k"
-APPLE_ITUNES_URL = "https://www.apple.com/itunes/"
+APPLE_DEVICES_ID = "9NP83LWLPZ9K"
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,6 @@ class DriverReport:
     mobile_service_installed: bool | None = None
     mobile_service_running: bool | None = None
     usb_driver_installed: bool | None = None
-    aisi_installed: bool | None = None
 
     @property
     def missing(self) -> tuple[str, ...]:
@@ -47,16 +47,11 @@ class DriverReport:
         if not self.windows:
             return self.summary()
         lines = ["<b>iOS 连接诊断</b><br>" + self.summary()]
-        if self.aisi_installed:
-            lines.append("检测到爱思助手。它可能已安装 Apple 驱动，但请以服务和 USB 驱动检测结果为准；"
-                         "若组件缺失，可先使用爱思助手内的驱动修复功能。")
-        else:
-            lines.append("未检测到爱思助手；无需专门安装它。")
         if self.mobile_service_running is False:
             lines.append("服务已安装但未运行：打开 Windows“服务”（services.msc），找到 Apple Mobile Device Service，尝试启动或重新启动。")
         if self.missing or self.mobile_service_installed is None or self.usb_driver_installed is None:
-            lines.append(f'下载/修复：安装或更新 <a href="{APPLE_DEVICES_URL}">Apple Devices（微软商店）</a>；'
-                         f'也可从 <a href="{APPLE_ITUNES_URL}">Apple 官网</a>安装 iTunes。安装后重启电脑并重新连接 iPhone。')
+            lines.append(f'驱动补全：可点击下方按钮安装 Apple 官方 <a href="{APPLE_DEVICES_URL}">Apple Devices</a>；'
+                         '无需安装完整 iTunes。完成后重新连接 iPhone 并再次检测。')
         lines.append(f'连接排查：解锁手机并选择“信任此电脑”；使用可传输数据的 USB 线；'
                      f'参考 <a href="{APPLE_HELP_URL}">Apple 官方识别设备指南</a>。')
         return "<br>".join(lines)
@@ -79,34 +74,6 @@ def _registry_key_exists(winreg, path: str) -> bool | None:
         return False
     except OSError:
         return None
-
-
-def _detect_aisi(winreg) -> bool | None:
-    prefixes = (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall")
-    readable = False
-    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-        for prefix in prefixes:
-            try:
-                with winreg.OpenKey(hive, prefix) as uninstall:
-                    readable = True
-                    index = 0
-                    while True:
-                        try:
-                            subkey = winreg.EnumKey(uninstall, index)
-                        except OSError:
-                            break
-                        index += 1
-                        try:
-                            with winreg.OpenKey(uninstall, subkey) as app:
-                                name = str(winreg.QueryValueEx(app, "DisplayName")[0]).casefold()
-                                if "爱思助手" in name or "i4tools" in name:
-                                    return True
-                        except OSError:
-                            continue
-            except OSError:
-                continue
-    return False if readable else None
 
 
 def probe() -> DriverReport:
@@ -143,4 +110,25 @@ def probe() -> DriverReport:
 
     return DriverReport(windows=True, apple_usb_connected=apple_usb,
                         mobile_service_installed=service, mobile_service_running=running,
-                        usb_driver_installed=driver, aisi_installed=_detect_aisi(winreg))
+                        usb_driver_installed=driver)
+
+
+def install_apple_devices() -> str:
+    """Install Apple's supported Windows device package, without installing iTunes."""
+    if sys.platform != "win32":
+        raise RuntimeError("驱动补全仅适用于 Windows。")
+    winget = shutil.which("winget")
+    if not winget:
+        raise RuntimeError("未找到 Windows 程序包管理器。请通过下方 Apple Devices 链接安装。")
+    args = [winget, "install", APPLE_DEVICES_ID, "--source", "msstore",
+            "--accept-source-agreements", "--accept-package-agreements", "--disable-interactivity"]
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=600,
+                                encoding="utf-8", errors="replace",
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("Apple Devices 安装未完成；请从微软商店手动安装。") from exc
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()[-500:]
+        raise RuntimeError("Apple Devices 安装失败：" + (detail or f"退出码 {result.returncode}"))
+    return "Apple Devices 安装完成。请重新连接 iPhone，然后再次点击“检查 iOS 驱动”。"

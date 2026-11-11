@@ -8,7 +8,7 @@ Mac 端支持 iOS 模拟器、实体 iPhone 和 Android 实体设备。Windows �
 
 - [`mac/`](mac/)：SwiftUI/MapKit 应用、Mac 端 Android 配套工程及 `.pkg` 构建脚本。
 - [`windows/`](windows/)：PySide6/Leaflet 应用、Windows 端 Android 配套工程及 `.exe` 安装包脚本。
-- [`VERSION`](VERSION)：两个平台共用的软件版本号；当前为 **0.1.0**。
+- [`VERSION`](VERSION)：两个平台共用的软件版本号；当前为 **0.1.1**。
 - [`scripts/check_versions.py`](scripts/check_versions.py)：检查平台构建配置是否使用统一版本号。
 
 设备连接和运行步骤分别见 [Mac 说明](mac/README.md) 与 [Windows 说明](windows/README.md)。

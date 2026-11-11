@@ -4,7 +4,7 @@
 
 ## Windows 上运行
 
-1. 安装 Windows 10/11 和 Python 3.12（64 位）。若要连接 iPhone，还需安装 Apple Devices 或 Apple 官网的 iTunes（包含 Apple Mobile Device Support/USB 驱动）。将 iPhone 用 USB 连接、解锁并点按“信任此电脑”；开启“开发者模式”并按提示重启。iPhone 需要 iOS 17 或更新版本。Android 和 HarmonyOS 的连接准备见下文。
+1. 安装 Windows 10/11 和 Python 3.12（64 位）。若要连接 iPhone，可在连接后点击“检查 iOS 驱动”；缺失时使用“一键补全 iOS 驱动”安装 Apple 官方 Apple Devices，无需安装完整 iTunes。将 iPhone 用 USB 连接、解锁并点按“信任此电脑”；开启“开发者模式”并按提示重启。iPhone 需要 iOS 17 或更新版本。Android 和 HarmonyOS 的连接准备见下文。
 2. 在 PowerShell 中运行：
 
    ```powershell
@@ -17,20 +17,20 @@
 
 Windows 无法运行 Apple 的 Xcode iOS Simulator，因此 Mac 版的 iOS 模拟器设备选项在 Windows 上没有对应设备；本程序的 iOS 定位目标是连接的实体 iPhone。
 
-若设备列表为空，先确认驱动已安装、USB 连接和信任状态。`pymobiledevice3 usbmux list --simple --usb` 是连接诊断的第一步。服务连接失败时，检查开发者模式以及 iOS 与 pymobiledevice3 的兼容性。某些设备准备步骤可能需要更新 Apple 驱动或完成配对。地图、地点搜索需要网络；手动坐标和设备通信可离线使用。
+若设备列表为空，先确认驱动已安装、USB 连接和信任状态。`pymobiledevice3 usbmux list --simple --usb` 是连接诊断的第一步。服务连接失败时，检查开发者模式以及 iOS 与 pymobiledevice3 的兼容性。某些设备准备步骤可能需要更新 Apple 驱动或完成配对。地图、地点搜索需要网络；OpenStreetMap 是境外地图服务，中国大陆暂不可用时会在地图上提示。手动坐标和设备通信可离线使用。
 
 ### iOS 驱动检测
 
-点击目标设备旁的“检查 iOS 驱动”，可查看 Apple Mobile Device Service 是否安装并运行、Apple USB 驱动是否可检测、以及是否安装爱思助手。刷新设备时，如果 Windows 检测到连接的 Apple USB 设备但没有找到 iPhone，也会自动显示诊断。爱思助手只作为诊断线索；即使它已安装，程序仍以 Apple 服务和驱动的实际检测结果判断是否就绪。
+连接 iPhone 后点击目标设备旁的“检查 iOS 驱动”，程序才检查 Apple Mobile Device Service 与 USB 驱动。检测到缺失时，可点击“一键补全 iOS 驱动”，通过 Windows 程序包管理器安装微软商店中的 Apple 官方 Apple Devices；不会安装完整 iTunes。若系统没有 `winget`，请通过 [微软商店](https://apps.microsoft.com/detail/9np83lwlpz9k) 手动安装。Apple 没有提供本项目可直接分发的独立最小驱动包，因此补全功能使用官方设备应用。安装后重新连接 iPhone，并再次点击检测。若服务已安装但未运行，可在 `services.msc` 中启动或重启 Apple Mobile Device Service；其他连接问题参见 [Apple 官方指南](https://support.apple.com/en-us/108643)。
 
-若提示缺少组件，优先安装或更新 [Apple Devices（微软商店）](https://apps.microsoft.com/detail/9np83lwlpz9k)，或从 [Apple 官网](https://www.apple.com/itunes/)安装 iTunes；若已经安装爱思助手，也可使用其驱动修复功能。安装后重启电脑，重新连接并解锁 iPhone，选择“信任此电脑”。若服务已安装但未运行，在 `services.msc` 中启动或重启 Apple Mobile Device Service。仍不能识别时参考 [Apple 官方连接排查](https://support.apple.com/en-us/108643)。驱动检测是只读检查；在不同版本的 Apple 驱动和 Windows 上，未检测到并不必然代表组件不存在。
 
 ## 打包
 
 在 Windows PowerShell 执行 `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`。输出目录为 `dist\WindowsLocationSimulator`；这是目录式程序，需连同目录中的依赖一起分发。当前构建会附带控制台窗口，以便设备桥接进程通过标准输入输出通信并显示诊断信息。Android 功能还需要单独安装 ADB Platform-Tools 和下述手机配套 App。尚未在真实 Windows 主机和实体手机上完成端到端测试，分发前应在目标系统验证安装、发现设备、设置和清除定位、路线运行。程序未签名。
 
 ## iOS 实体设备
-本产品对iOS设备完美适配，利用iOS的开发者套件，可以实现更底层的定位修改。实测小程序校园跑可完美兼容。
+
+通过 Apple 开发者工具连接受信任的 iPhone 进行开发和定位测试。请遵守设备及所测试服务的使用规则。
 
 ## Android 实体设备
 
@@ -42,7 +42,7 @@ Windows 端通过 ADB 向配套 App 的受限广播接收器发送坐标。接�
 
 ## HarmonyOS 实体设备
 
-原生 HarmonyOS 7.0.0 及以上设备可使用华为官方 [testhelper 位置模拟命令](https://developer.huawei.com/consumer/cn/doc/HarmonyOS-Guides/testhelper-guidelines/)。在 Windows 安装 DevEco Studio 或华为 [Command Line Tools](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-commandline-get)，手机开启开发者选项和 USB 调试并授权电脑。程序会自动检查 PATH 和常见 SDK 安装目录；若找不到 `hdc`，点击刷新后会询问是否打开华为官方安装说明。安装/解压后再次刷新，程序会自动发现常见 SDK 路径并在本次运行中配置 `hdc`，不必手动修改系统 PATH。也可将 SDK 的 `toolchains` 目录（包含 `hdc.exe`）加入 PATH。确认设备已授权后，选择“HarmonyOS 设备”。单点和路线都通过 hdc 向设备发送 GPX，再由 `testhelper` 回放；清除定位会恢复真实位置。
+原生 HarmonyOS 7.0.0 及以上设备可使用华为官方 [testhelper 位置模拟命令](https://developer.huawei.com/consumer/cn/doc/HarmonyOS-Guides/testhelper-guidelines/)。在 Windows 安装 DevEco Studio 或华为 [Command Line Tools](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-commandline-get)，手机开启开发者选项和 USB 调试并授权电脑。程序会自动检查 PATH 和常见 SDK 安装目录；若找不到 `hdc`，仅在检测到连接的华为 USB 设备时，点击刷新才会询问是否打开华为官方安装说明。安装/解压后再次刷新，程序会自动发现常见 SDK 路径并在本次运行中配置 `hdc`，不必手动修改系统 PATH。也可将 SDK 的 `toolchains` 目录（包含 `hdc.exe`）加入 PATH。确认设备已授权后，选择“HarmonyOS 设备”。单点和路线都通过 hdc 向设备发送 GPX，再由 `testhelper` 回放；清除定位会恢复真实位置。
 
 testhelper 每个 GPX 最多支持 1000 个位置点，更新间隔必须是 1～3600 秒的整数。程序会按路线时长自动选取间隔，并在设备端回放期间保留停止功能；因此 HarmonyOS 路线的时间和位置精度可能低于 iPhone/Android 约 0.5 秒一次的更新。设备端若返回“不支持位置模拟”，程序会显示具体错误。程序退出时会尝试关闭通过本程序启用的模拟定位。连接方式和 hdc 安装见 [华为官方 hdc 文档](https://developer.huawei.com/consumer/en/doc/harmonyos-guides/hdc/)。
 
@@ -50,5 +50,5 @@ testhelper 每个 GPX 最多支持 1000 个位置点，更新间隔必须是 1�
 
 ## 验证
 
-运行 `python -m unittest discover -s tests -v` 验证配置兼容、轨迹、跑道、动态速度、ADB/HDC 命令及 iOS 驱动诊断。实体设备验证需在 Windows/iPhone/Android/HarmonyOS 环境进行。项目仅用于开发与测试。
+运行 `python -m unittest discover -s tests -v` 验证配置兼容、轨迹、跑道、动态速度、ADB/HDC 命令及 iOS 驱动诊断。实体设备验证需在 Windows/iPhone/Android/HarmonyOS 环境进行。首次打开会显示使用须知，主页底部也保留简短警示；项目仅用于开发工具研究学习。
 

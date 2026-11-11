@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val productVersion = rootProject.file("../../VERSION").readText().trim()
+val versionParts = productVersion.split('.').map(String::toInt)
+
 android {
     namespace = "com.windowslocationsimulator.mock"
     compileSdk = 35
@@ -11,8 +14,8 @@ android {
         applicationId = "com.windowslocationsimulator.mock"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = rootProject.file("../../VERSION").readText().trim()
+        versionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+        versionName = productVersion
     }
 
     compileOptions {

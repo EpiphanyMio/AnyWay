@@ -4,17 +4,15 @@ import types
 import unittest
 from unittest.mock import patch
 
-from winloc.driver_check import DriverReport, probe
+from winloc.driver_check import DriverReport, install_apple_devices, probe
 
 
 class DriverCheckTests(unittest.TestCase):
-    def test_aisi_installation_does_not_hide_missing_apple_components(self):
+    def test_missing_apple_components_offer_official_repair(self):
         report = DriverReport(windows=True, apple_usb_connected=True,
-                              mobile_service_installed=False, usb_driver_installed=False,
-                              aisi_installed=True)
+                              mobile_service_installed=False, usb_driver_installed=False)
         self.assertIn("Apple Mobile Device Service", report.missing)
         self.assertIn("Apple Mobile Device USB Driver", report.missing)
-        self.assertIn("爱思助手", report.guide_html())
         self.assertIn("apps.microsoft.com", report.guide_html())
         self.assertIn("support.apple.com", report.guide_html())
 
@@ -42,13 +40,21 @@ class DriverCheckTests(unittest.TestCase):
         with (patch("winloc.driver_check.sys.platform", "win32"),
               patch.dict(sys.modules, {"winreg": types.SimpleNamespace()}),
               patch("winloc.driver_check._registry_key_exists", side_effect=[True, False, False, False]),
-              patch("winloc.driver_check._detect_aisi", return_value=True),
               patch("winloc.driver_check._run", side_effect=result)):
             report = probe()
         self.assertTrue(report.apple_usb_connected)
         self.assertTrue(report.mobile_service_running)
         self.assertTrue(report.usb_driver_installed)
-        self.assertTrue(report.aisi_installed)
+
+    def test_repair_installs_only_apple_devices_store_package(self):
+        with (patch("winloc.driver_check.sys.platform", "win32"),
+              patch("winloc.driver_check.shutil.which", return_value="winget.exe"),
+              patch("winloc.driver_check.subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, "", "")) as run):
+            self.assertIn("安装完成", install_apple_devices())
+        command = run.call_args.args[0]
+        self.assertIn("9NP83LWLPZ9K", command)
+        self.assertIn("msstore", command)
 
 
 if __name__ == "__main__":

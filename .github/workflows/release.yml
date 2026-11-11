@@ -1,0 +1,126 @@
+name: AnyWay release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify product version
+        run: python3 scripts/check_versions.py
+      - name: Test Mac application
+        working-directory: mac
+        run: swift test
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Build Mac Android companion
+        working-directory: mac/android
+        run: gradle :app:assembleDebug
+      - name: Build Mac package
+        working-directory: mac
+        run: bash scripts/build-pkg.sh
+      - name: Name Mac assets
+        run: |
+          version="$(cat VERSION)"
+          mkdir -p release/mac
+          mv "mac/dist/AnyWay-$version-arm64.pkg" "release/mac/AnyWay-$version-macOS-arm64.pkg"
+          cp mac/android/app/build/outputs/apk/debug/app-debug.apk "release/mac/AnyWay-$version-macOS-Android.apk"
+          (cd release/mac && shasum -a 256 AnyWay-* > "AnyWay-$version-macOS-SHA256SUMS.txt")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-package
+          path: release/mac/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify product version
+        shell: pwsh
+        run: python scripts/check_versions.py
+      - name: Test Windows application
+        working-directory: windows
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+      - name: Build Windows Android companion
+        working-directory: windows/android-companion
+        shell: pwsh
+        run: gradle :app:assembleDebug
+      - name: Build Windows application
+        working-directory: windows
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Smoke test Windows executable
+        shell: pwsh
+        run: |
+          & ./windows/dist/WindowsLocationSimulator/WindowsLocationSimulator.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' windows/packaging/windows.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Name Windows assets
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          New-Item -ItemType Directory -Force release/windows | Out-Null
+          Copy-Item "windows/dist/release/AnyWay-$version-Windows-Setup.exe" release/windows/
+          Copy-Item windows/android-companion/app/build/outputs/apk/debug/app-debug.apk "release/windows/AnyWay-$version-Windows-Android.apk"
+          Get-ChildItem release/windows/AnyWay-* | Get-FileHash -Algorithm SHA256 | ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } | Set-Content "release/windows/AnyWay-$version-Windows-SHA256SUMS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/windows/*
+          if-no-files-found: error
+
+  publish:
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-package
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: release-assets
+      - name: Publish both platforms under one tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -f "release-assets/AnyWay-$(cat VERSION)-macOS-arm64.pkg"
+          test -f "release-assets/AnyWay-$(cat VERSION)-Windows-Setup.exe"
+          test -f "release-assets/AnyWay-$(cat VERSION)-macOS-Android.apk"
+          test -f "release-assets/AnyWay-$(cat VERSION)-Windows-Android.apk"
+          gh release create "v$(cat VERSION)" release-assets/* \
+            --target "$GITHUB_SHA" \
+            --title "AnyWay $(cat VERSION)" \
+            --notes-file windows/RELEASE-NOTES.md

@@ -4,10 +4,21 @@ from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 from winloc.core import Configuration, Coordinate
-from winloc.harmony import HarmonyBridge, _run, connected_devices, gpx, route_samples
+from winloc.harmony import (HarmonyBridge, _run, connected_devices, gpx,
+                            harmony_usb_connected, route_samples)
 
 
 class HarmonyTests(unittest.TestCase):
+    def test_missing_hdc_prompt_requires_connected_huawei_usb_device(self):
+        with (patch("winloc.harmony.sys.platform", "win32"),
+              patch("winloc.harmony.subprocess.run", return_value=
+                    subprocess.CompletedProcess([], 0, "USB\\VID_12D1&PID_1234", ""))):
+            self.assertTrue(harmony_usb_connected())
+        with (patch("winloc.harmony.sys.platform", "win32"),
+              patch("winloc.harmony.subprocess.run", return_value=
+                    subprocess.CompletedProcess([], 0, "USB\\VID_05AC&PID_1234", ""))):
+            self.assertFalse(harmony_usb_connected())
+
     def test_gpx_and_sample_limit(self):
         one = ET.fromstring(gpx([Coordinate(39.9, 116.4)]))
         self.assertEqual(one.find("{*}wpt").attrib["lat"], "39.90000000")

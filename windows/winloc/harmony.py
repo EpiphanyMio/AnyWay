@@ -8,6 +8,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -19,6 +20,20 @@ from .core import Configuration, Coordinate, MotionProfile, RouteStepper, closed
 MAX_POINTS = 1000
 MAX_INTERVAL = 3600
 _configured_hdc: str | None = None
+
+
+def harmony_usb_connected() -> bool:
+    """Only suggest hdc setup when a Huawei USB device is actually present."""
+    if sys.platform != "win32":
+        return False
+    try:
+        result = subprocess.run(["pnputil.exe", "/enum-devices", "/connected"],
+                                capture_output=True, text=True, timeout=10,
+                                encoding="utf-8", errors="replace",
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and bool(re.search(r"USB\\VID_12D1", result.stdout, re.I))
 
 
 def configure_hdc(path: str | None = None) -> str | None:

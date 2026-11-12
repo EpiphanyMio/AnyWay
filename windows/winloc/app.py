@@ -164,12 +164,14 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AnyWay · Windows")
-        self.resize(1250, 820)
+        available = QApplication.primaryScreen().availableGeometry()
+        self.resize(min(1250, available.width()), min(820, available.height()))
         self.pool = QThreadPool.globalInstance()
         self.ios_session = PhoneSession()
         self.android_bridge = AndroidBridge()
         self.harmony_bridge = HarmonyBridge()
         self.runner = None
+        self._device_busy = False
         self.points = []
         self.places = []
         self.selected_place = None
@@ -181,6 +183,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._apply_style()
         self._load_draft()
+        self._update_action_state()
         self.draft_timer = QTimer(self)
         self.draft_timer.timeout.connect(self._save_draft)
         self.draft_timer.start(2000)
@@ -284,7 +287,9 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
         side = QVBoxLayout(sidebar)
         scroll.setWidget(sidebar)
         scroll.setMinimumWidth(360)
@@ -292,13 +297,15 @@ class MainWindow(QMainWindow):
         splitter.setSizes([830, 400])
 
         devices = self._box("目标设备", side)
-        row = QHBoxLayout()
         self.device_combo = QComboBox()
-        row.addWidget(self.device_combo, 1)
-        self._button("刷新", self.refresh_devices, row)
+        devices.addWidget(self.device_combo)
+        row = QHBoxLayout()
+        self.refresh_button = self._button("刷新", self.refresh_devices, row)
         self._button("检查 iOS 驱动", self.check_ios_drivers, row)
         devices.addLayout(row)
-        devices.addWidget(QLabel("支持 USB iPhone、ADB Android 和 hdc HarmonyOS 7+ 设备。"))
+        device_hint = QLabel("支持 USB iPhone、ADB Android 和 hdc HarmonyOS 7+ 设备。")
+        device_hint.setWordWrap(True)
+        devices.addWidget(device_hint)
         self.driver_guide = QLabel()
         self.driver_guide.setTextFormat(Qt.RichText)
         self.driver_guide.setOpenExternalLinks(True)
@@ -325,7 +332,13 @@ class MainWindow(QMainWindow):
         self.name = QLineEdit("我的路线")
         route.addWidget(self.name)
         self.editor_tabs = QTabWidget()
-        self.editor_tabs.addTab(QLabel("在左侧地图单击添加路径点，拖动已有点可调整位置；终点会自动连接起点。"), "地图绘制")
+        map_tab = QWidget()
+        map_tab_layout = QVBoxLayout(map_tab)
+        route_hint = QLabel("在左侧地图单击添加路径点，拖动已有点可调整位置；终点会自动连接起点。")
+        route_hint.setWordWrap(True)
+        map_tab_layout.addWidget(route_hint)
+        map_tab_layout.addStretch()
+        self.editor_tabs.addTab(map_tab, "地图绘制")
         text_tab = QWidget()
         text_layout = QVBoxLayout(text_tab)
         self.route_text = QTextEdit()
@@ -338,7 +351,9 @@ class MainWindow(QMainWindow):
         route.addWidget(self.editor_tabs)
 
         track = self._box("400 米环形跑道", side)
-        track.addWidget(QLabel("先在地图上选择一条长直边的两个端点（20～200 米，不含 200 米）。"))
+        track_hint = QLabel("先在地图上选择一条长直边的两个端点（20～200 米，不含 200 米）。")
+        track_hint.setWordWrap(True)
+        track.addWidget(track_hint)
         self.track_side = QComboBox()
         self.track_side.addItem("右侧展开", "right")
         self.track_side.addItem("左侧展开", "left")
@@ -353,9 +368,6 @@ class MainWindow(QMainWindow):
         self.speed.setValue(5)
         self.speed.valueChanged.connect(self._sync_pace)
         form.addRow("速度 m/s", self.speed)
-        pace_row = QWidget()
-        pace_layout = QHBoxLayout(pace_row)
-        pace_layout.setContentsMargins(0, 0, 0, 0)
         self.pace_min, self.pace_sec = QSpinBox(), QSpinBox()
         self.pace_min.setRange(0, 999)
         self.pace_sec.setRange(0, 59)
@@ -363,11 +375,8 @@ class MainWindow(QMainWindow):
         self.pace_sec.setValue(20)
         self.pace_min.valueChanged.connect(self._sync_speed)
         self.pace_sec.valueChanged.connect(self._sync_speed)
-        pace_layout.addWidget(self.pace_min)
-        pace_layout.addWidget(QLabel("分"))
-        pace_layout.addWidget(self.pace_sec)
-        pace_layout.addWidget(QLabel("秒/公里"))
-        form.addRow("配速", pace_row)
+        form.addRow("配速 分/公里", self.pace_min)
+        form.addRow("配速 秒/公里", self.pace_sec)
         self.jitter = QDoubleSpinBox()
         self.jitter.setRange(0, 100)
         self.jitter.setValue(15)
@@ -427,28 +436,39 @@ class MainWindow(QMainWindow):
 
     def _apply_style(self):
         self.setStyleSheet("""
-            QMainWindow, QWidget#centralRoot { background: #f5f7fa; color: #1c2938; font-size: 13px; }
+            QWidget { color: #1c2938; font-size: 13px; }
+            QMainWindow, QWidget#centralRoot, QWidget#sidebar, QDialog { background: #f5f7fa; }
             QLabel#appTitle { font-size: 25px; font-weight: 700; color: #102d3b; }
             QLabel#appSubtitle { color: #677989; margin-left: 8px; }
-            QGroupBox { background: #ffffff; border: 1px solid #dce5eb; border-radius: 12px;
+            QGroupBox { background: #ffffff; border: 1px solid #dce5eb; border-radius: 16px;
                         margin-top: 12px; padding: 14px 12px 12px; font-weight: 600; }
             QGroupBox::title { subcontrol-origin: margin; left: 15px; padding: 0 5px; color: #31516a; }
             QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QListWidget {
-                background: #ffffff; border: 1px solid #cad6df; border-radius: 7px;
+                color: #1c2938; background: #ffffff; border: 1px solid #cad6df; border-radius: 10px;
                 padding: 5px 7px; selection-background-color: #c8ece8; }
+            QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled,
+            QSpinBox:disabled, QDoubleSpinBox:disabled, QListWidget:disabled {
+                color: #536675; background: #edf1f4; }
+            QComboBox QAbstractItemView { color: #1c2938; background: #ffffff;
+                                      selection-color: #075b55; selection-background-color: #d9f1ed; }
             QLineEdit:focus, QTextEdit:focus, QComboBox:focus { border: 1px solid #087f77; }
-            QPushButton { background: #ffffff; border: 1px solid #cad6df; border-radius: 7px;
-                          padding: 7px 11px; font-weight: 500; }
+            QPushButton { color: #173042; background: #ffffff; border: 1px solid #cad6df;
+                          border-radius: 12px; padding: 8px 14px; font-weight: 500; }
             QPushButton:hover { background: #e9f5f3; border-color: #78b8ae; }
-            QPushButton:disabled { color: #9daab4; background: #f5f7fa; }
+            QPushButton:pressed { background: #d9f1ed; border-color: #087f77; }
+            QPushButton:disabled { color: #536675; background: #edf1f4; border-color: #d9e1e7; }
             QPushButton#primaryButton { background: #087f77; color: white; border-color: #087f77;
                                         font-weight: 600; }
             QPushButton#primaryButton:hover { background: #076e67; }
-            QScrollArea { border: 0; background: transparent; }
-            QTabWidget::pane { border: 1px solid #dce5eb; border-radius: 7px; }
-            QTabBar::tab { padding: 6px 10px; background: #edf2f5; border-radius: 5px; }
+            QPushButton#primaryButton:disabled { color: #536675; background: #edf1f4;
+                                                  border-color: #d9e1e7; }
+            QCheckBox:disabled { color: #536675; }
+            QScrollArea { border: 0; background: #f5f7fa; }
+            QSplitter::handle { background: #dce5eb; }
+            QTabWidget::pane { border: 1px solid #dce5eb; border-radius: 10px; }
+            QTabBar::tab { color: #31516a; padding: 7px 12px; background: #edf2f5; border-radius: 9px; }
             QTabBar::tab:selected { background: #d9f1ed; color: #075b55; }
-            QLabel#statusLabel { background: #e8f2f4; border-radius: 8px; padding: 9px 12px; }
+            QLabel#statusLabel { background: #e8f2f4; border-radius: 12px; padding: 9px 12px; }
             QLabel#noticeLabel { color: #657582; font-size: 11px; }
         """)
 
@@ -531,17 +551,20 @@ class MainWindow(QMainWindow):
 
     def _text_changed(self):
         self.text_pending = True
+        self._update_action_state()
 
     def _sync_text(self):
         self.route_text.blockSignals(True)
         self.route_text.setPlainText("\n".join(f"{p.latitude:.8f},{p.longitude:.8f}" for p in self.points))
         self.route_text.blockSignals(False)
         self.text_pending = False
+        self._update_action_state()
 
     def apply_text(self):
         try:
             self.points = parse_points(self.route_text.toPlainText())
             self.text_pending = False
+            self._update_action_state()
             self.draw_map(True)
             self.status.setText(f"已应用 {len(self.points)} 个路径点。")
         except ValueError as exc:
@@ -641,6 +664,8 @@ class MainWindow(QMainWindow):
         self.draw_map(True)
 
     def refresh_devices(self):
+        if self.runner or self._device_busy:
+            return
         def discover():
             found, errors = [], []
             harmony_attached = False
@@ -671,6 +696,7 @@ class MainWindow(QMainWindow):
         index = self.device_combo.findData(previous)
         if index >= 0:
             self.device_combo.setCurrentIndex(index)
+        self._update_action_state()
         self.status.setText((f"找到 {len(devices)} 台设备。" if devices else "未找到设备。")
                             + (" " + "；".join(errors) if errors and not devices else ""))
         if harmony_attached:
@@ -719,28 +745,30 @@ class MainWindow(QMainWindow):
         return backend, identifier
 
     def set_point(self):
-        if self.runner:
+        if self.runner or self._device_busy:
             return
         try:
             backend, identifier = self._target()
             point = self._single_coordinate()
-            self._task(lambda: backend.set(identifier, point),
-                       lambda _: self.status.setText(f"已设置定位：{point.latitude:.8f},{point.longitude:.8f}"),
-                       "正在设置定位…")
+            self._device_task(lambda: backend.set(identifier, point),
+                              lambda _: self.status.setText(f"已设置定位：{point.latitude:.8f},{point.longitude:.8f}"),
+                              "正在设置定位…")
         except ValueError as exc:
             self.status.setText(str(exc))
 
     def clear_location(self):
-        if self.runner:
+        if self.runner or self._device_busy:
             return
         try:
             backend, identifier = self._target()
-            self._task(lambda: backend.clear(identifier),
-                       lambda _: self.status.setText("已清除模拟定位。"), "正在清除定位…")
+            self._device_task(lambda: backend.clear(identifier),
+                              lambda _: self.status.setText("已清除模拟定位。"), "正在清除定位…")
         except ValueError as exc:
             self.status.setText(str(exc))
 
     def start_route(self):
+        if self.runner or self._device_busy:
+            return
         try:
             backend, identifier = self._target()
             config = self._configuration()
@@ -773,17 +801,54 @@ class MainWindow(QMainWindow):
     def _set_running(self, running):
         for group in self.groups:
             group.setEnabled(not running)
-        for button in (self.start_button, self.import_button, self.save_button,
-                       self.place_point_button, self.place_route_button,
-                       self.undo_button, self.clear_route_button, self.set_button,
-                       self.clear_button, self.apply_button, self.track_button):
-            button.setEnabled(not running)
-        self.stop_button.setEnabled(running)
+        self._update_action_state()
         self.draw_map(False)
+
+    def _update_action_state(self):
+        editing = self.runner is None
+        idle = editing and not self._device_busy
+        has_device = self.device_combo.currentData() is not None
+        has_place = self.selected_place is not None
+        self.device_combo.setEnabled(idle)
+        self.set_button.setEnabled(idle and has_device)
+        self.clear_button.setEnabled(idle and has_device)
+        self.start_button.setEnabled(idle and has_device)
+        self.stop_button.setEnabled(not editing and not self.runner.stop_event.is_set())
+        self.refresh_button.setEnabled(idle)
+        self.import_button.setEnabled(editing)
+        self.save_button.setEnabled(editing)
+        self.place_point_button.setEnabled(editing and has_place)
+        self.place_route_button.setEnabled(editing and has_place and not self.text_pending
+                                           and len(self.points) < 10_000)
+        self.undo_button.setEnabled(editing and not self.text_pending and bool(self.points))
+        self.clear_route_button.setEnabled(editing and not self.text_pending and bool(self.points))
+        self.apply_button.setEnabled(editing and self.text_pending)
+        self.track_button.setEnabled(editing)
+
+    def _device_task(self, fn, done, busy_text):
+        self._device_busy = True
+        self._update_action_state()
+
+        def finished(result):
+            self._device_busy = False
+            self._update_action_state()
+            done(result)
+
+        def failed(message):
+            self._device_busy = False
+            self._update_action_state()
+            self.status.setText(message)
+
+        task = Task(fn)
+        task.signals.result.connect(finished)
+        task.signals.error.connect(failed)
+        self.status.setText(busy_text)
+        self.pool.start(task)
 
     def stop_route(self):
         if self.runner:
             self.runner.stop_event.set()
+            self._update_action_state()
             self.status.setText("正在停止…")
 
     def search(self):
@@ -807,6 +872,7 @@ class MainWindow(QMainWindow):
 
     def select_place(self, index):
         self.selected_place = self.places[index] if 0 <= index < len(self.places) else None
+        self._update_action_state()
         self.draw_map(False)
         if self.selected_place:
             point = self.selected_place["point"]

@@ -12,6 +12,16 @@ mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
 cp "$bin_dir/LocationSimulator" "$app_dir/Contents/MacOS/LocationSimulator"
 cp scripts/iphone_location_bridge.py "$app_dir/Contents/Resources/iphone_location_bridge.py"
+iconset_dir="$PWD/.build/AnyWay.iconset"
+mkdir -p "$iconset_dir"
+for size in 16 32 128 256 512; do
+    sips -s format png -z "$size" "$size" ../assets/app-icon.png \
+        --out "$iconset_dir/icon_${size}x${size}.png" >/dev/null
+    doubled=$((size * 2))
+    sips -s format png -z "$doubled" "$doubled" ../assets/app-icon.png \
+        --out "$iconset_dir/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset_dir" -o "$app_dir/Contents/Resources/AnyWay.icns"
 if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
     cp android/app/build/outputs/apk/debug/app-debug.apk \
         "$app_dir/Contents/Resources/LocationSimulator-Android.apk"
@@ -45,6 +55,7 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key><string>local.LocationSimulator</string>
     <key>CFBundleName</key><string>AnyWay</string>
     <key>CFBundleDisplayName</key><string>AnyWay</string>
+    <key>CFBundleIconFile</key><string>AnyWay.icns</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
     <key>CFBundleVersion</key><string>$version</string>

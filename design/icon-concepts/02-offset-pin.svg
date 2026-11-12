@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="AnyWay offset to virtual location pin icon">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#222865"/>
+      <stop offset=".55" stop-color="#192E58"/>
+      <stop offset="1" stop-color="#0B3442"/>
+    </linearGradient>
+    <linearGradient id="motion" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#A5A5FF"/>
+      <stop offset=".55" stop-color="#83C6ED"/>
+      <stop offset="1" stop-color="#8AF5D9"/>
+    </linearGradient>
+    <linearGradient id="pin" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#B6FFE9"/>
+      <stop offset="1" stop-color="#65DFC9"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#night)"/>
+  <circle cx="700" cy="356" r="234" fill="#8FF8E1" opacity=".055"/>
+  <circle cx="700" cy="356" r="194" fill="none" stroke="#8FF8E1" stroke-width="17" opacity=".13"/>
+  <path d="M285 730C470 730 490 353 700 353" fill="none"
+        stroke="#0C203E" stroke-width="84" stroke-linecap="round" opacity=".45"/>
+  <path d="M285 730C470 730 490 353 700 353" fill="none"
+        stroke="url(#motion)" stroke-width="65" stroke-linecap="round"/>
+  <circle cx="285" cy="730" r="124" fill="#A8A8FF" opacity=".11"/>
+  <circle cx="285" cy="730" r="86" fill="#1D285A" stroke="#AAA9FF" stroke-width="34"/>
+  <circle cx="285" cy="730" r="27" fill="#F0EEFF"/>
+  <path d="M700 197C609 197 548 263 548 352C548 449 615 530 700 624C785 530 852 449 852 352C852 263 791 197 700 197Z"
+        fill="url(#pin)" stroke="#D1FFF0" stroke-width="10" stroke-linejoin="round"/>
+  <circle cx="700" cy="353" r="70" fill="#18395A"/>
+  <circle cx="700" cy="353" r="25" fill="#F6FFFB"/>
+</svg>

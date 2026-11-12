@@ -14,11 +14,15 @@ $filteredPath = foreach ($entry in ($env:PATH -split ';')) {
 }
 $env:PATH = $filteredPath -join ';'
 & .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --hide-console hide-early --name WindowsLocationSimulator `
+  --icon ..\assets\app-icon.ico `
   --runtime-hook scripts\pyi_rth_qt_dll.py `
   --collect-all pymobiledevice3 --collect-all pytun_pmd3 --collect-all PySide6.QtWebEngineCore `
   --add-data "winloc\map.html;winloc" --add-data "winloc\qwebchannel.js;winloc" `
   --add-data "winloc\combo_arrow.svg;winloc" --add-data "winloc\spin_up_arrow.svg;winloc" `
   --add-data "winloc\down_arrow_disabled.svg;winloc" --add-data "winloc\spin_up_arrow_disabled.svg;winloc" `
+  --add-data "winloc\combo_arrow_dark.svg;winloc" --add-data "winloc\spin_up_arrow_dark.svg;winloc" `
+  --add-data "winloc\down_arrow_disabled_dark.svg;winloc" --add-data "winloc\spin_up_arrow_disabled_dark.svg;winloc" `
+  --add-data "..\assets\app-icon.png;assets" `
   --add-data "..\VERSION;." `
   --add-data "winloc\vendor;winloc\vendor" --add-data "winloc\iphone_bridge.py;winloc" `
   --paths . launcher.py

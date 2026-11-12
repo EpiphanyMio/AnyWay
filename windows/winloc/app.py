@@ -11,7 +11,7 @@ import threading
 import time
 
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox, QSplitter,
@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
         self.settings = self._read_json(SETTINGS, {"restore": True, "auto_refresh": True, "history": []})
         self._build_ui()
         self._apply_style()
+        QApplication.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
         self._load_draft()
         self._update_action_state()
         self.draft_timer = QTimer(self)
@@ -476,7 +477,24 @@ class MainWindow(QMainWindow):
         outer.addWidget(notice)
 
     def _apply_style(self):
-        self.setStyleSheet("""
+        mode = self.settings.get("appearance", "system")
+        dark = mode == "dark" or (mode == "system" and
+                QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark)
+        palette = QPalette()
+        for role, light_color, dark_color in (
+            (QPalette.ColorRole.Window, "#f5f7fa", "#151b24"),
+            (QPalette.ColorRole.WindowText, "#1c2938", "#e3eaf0"),
+            (QPalette.ColorRole.Base, "#ffffff", "#242d39"),
+            (QPalette.ColorRole.AlternateBase, "#edf2f5", "#303d49"),
+            (QPalette.ColorRole.Text, "#1c2938", "#e3eaf0"),
+            (QPalette.ColorRole.Button, "#ffffff", "#303d49"),
+            (QPalette.ColorRole.ButtonText, "#1c2938", "#e3eaf0"),
+            (QPalette.ColorRole.Highlight, "#087f77", "#087f77"),
+            (QPalette.ColorRole.HighlightedText, "#ffffff", "#ffffff"),
+        ):
+            palette.setColor(role, QColor(dark_color if dark else light_color))
+        self.setPalette(palette)
+        sheet = """
             QWidget { color: #1c2938; font-size: 13px; }
             QMainWindow, QWidget#centralRoot, QWidget#sidebar, QDialog { background: #f5f7fa; }
             QLabel#appTitle { font-size: 25px; font-weight: 700; color: #102d3b; }
@@ -548,10 +566,34 @@ class MainWindow(QMainWindow):
             QTabBar::tab:selected { background: #d9f1ed; color: #075b55; }
             QLabel#statusLabel { background: #e8f2f4; border-radius: 12px; padding: 9px 12px; }
             QLabel#noticeLabel { color: #657582; font-size: 11px; }
-        """.replace("__COMBO_ARROW__", (Path(__file__).with_name("combo_arrow.svg")).as_posix())
-           .replace("__SPIN_UP_ARROW__", (Path(__file__).with_name("spin_up_arrow.svg")).as_posix())
-           .replace("__DISABLED_DOWN_ARROW__", (Path(__file__).with_name("down_arrow_disabled.svg")).as_posix())
-           .replace("__DISABLED_UP_ARROW__", (Path(__file__).with_name("spin_up_arrow_disabled.svg")).as_posix()))
+        """
+        if dark:
+            colors = {
+                "#1c2938": "#e3eaf0", "#f5f7fa": "#151b24", "#102d3b": "#f2f8fa",
+                "#677989": "#a7b7c5", "#ffffff": "#242d39", "#dce5eb": "#3b4a59",
+                "#31516a": "#bfd4df", "#cad6df": "#506274", "#c8ece8": "#245c59",
+                "#f2f6f8": "#303d49", "#e9f5f3": "#34514f", "#edf1f4": "#303944",
+                "#d9f1ed": "#245c59", "#536675": "#9baebc", "#075b55": "#e2fffa",
+                "#173042": "#e3eaf0", "#78b8ae": "#72c7ba", "#d9e1e7": "#475766",
+                "#edf2f5": "#303d49", "#e8f2f4": "#263d48", "#657582": "#a7b7c5",
+            }
+            for light_color, dark_color in colors.items():
+                sheet = sheet.replace(light_color, dark_color)
+        suffix = "_dark" if dark else ""
+        for placeholder, filename in (
+            ("__COMBO_ARROW__", f"combo_arrow{suffix}.svg"),
+            ("__SPIN_UP_ARROW__", f"spin_up_arrow{suffix}.svg"),
+            ("__DISABLED_DOWN_ARROW__", f"down_arrow_disabled{suffix}.svg"),
+            ("__DISABLED_UP_ARROW__", f"spin_up_arrow_disabled{suffix}.svg"),
+        ):
+            sheet = sheet.replace(placeholder, Path(__file__).with_name(filename).as_posix())
+        self.setStyleSheet(sheet)
+        if self.map_ready:
+            self._js("setTheme", dark)
+
+    def _system_theme_changed(self, _scheme):
+        if self.settings.get("appearance", "system") == "system":
+            self._apply_style()
 
     def _show_research_notice(self):
         QMessageBox.warning(self, "使用须知", RESEARCH_NOTICE, QMessageBox.Ok)
@@ -568,6 +610,7 @@ class MainWindow(QMainWindow):
     def _map_loaded(self, ok):
         self.map_ready = ok
         if ok:
+            self._apply_style()
             self.draw_map(True)
         else:
             self.status.setText("地图加载失败：本软件接入境外 OpenStreetMap 地图服务，中国大陆暂不可用。")
@@ -1004,6 +1047,13 @@ class MainWindow(QMainWindow):
         auto.setChecked(self.settings.get("auto_refresh", True))
         layout.addWidget(restore)
         layout.addWidget(auto)
+        appearance = QComboBox()
+        for title, key in (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark")):
+            appearance.addItem(title, key)
+        appearance.setCurrentIndex(max(0, appearance.findData(self.settings.get("appearance", "system"))))
+        appearance.currentIndexChanged.connect(lambda: self._set_appearance(appearance.currentData()))
+        layout.addWidget(QLabel("外观"))
+        layout.addWidget(appearance)
         self._button("检查更新", lambda: self.check_for_updates(manual=True), layout)
         self._button("清除搜索历史", lambda: self.settings.update(history=[]), layout)
         self._button("清除路线记忆", self._clear_draft, layout)
@@ -1012,6 +1062,11 @@ class MainWindow(QMainWindow):
         self.settings_dialog = None
         self.settings.update(restore=restore.isChecked(), auto_refresh=auto.isChecked())
         self._write_json(SETTINGS, self.settings)
+
+    def _set_appearance(self, mode):
+        self.settings["appearance"] = mode
+        self._write_json(SETTINGS, self.settings)
+        self._apply_style()
 
     def check_for_updates(self, manual=False):
         if getattr(self, "_update_check_running", False):
@@ -1117,6 +1172,8 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    app.setWindowIcon(QIcon(str(resource_root / "assets" / "app-icon.png")))
     window = MainWindow()
     window.show()
     return app.exec()

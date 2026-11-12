@@ -8,6 +8,7 @@ struct ContentView: View {
     @StateObject private var updateChecker = UpdateChecker()
     @AppStorage("restoreLastRoute") private var restoreLastRoute = true
     @AppStorage("autoRefreshDevices") private var autoRefreshDevices = true
+    @AppStorage("appearanceMode") private var appearanceMode = "system"
     @AppStorage("hasAcknowledgedResearchNotice") private var hasAcknowledgedResearchNotice = false
     @State private var showingResearchNotice = false
     @State private var name = "我的路线"
@@ -149,6 +150,11 @@ struct ContentView: View {
                     .keyboardShortcut(.defaultAction)
             }
             Divider()
+            Picker("外观", selection: $appearanceMode) {
+                Text("跟随系统").tag("system")
+                Text("浅色").tag("light")
+                Text("深色").tag("dark")
+            }
             Toggle("启动时恢复上次路线", isOn: $restoreLastRoute)
             Text("自动记住路径点、未应用的坐标文本和移动参数；关闭后仍保存编辑内容，但启动时不自动载入。")
                 .font(.caption).foregroundStyle(.secondary)

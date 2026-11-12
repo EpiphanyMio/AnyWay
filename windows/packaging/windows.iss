@@ -18,6 +18,7 @@ OutputBaseFilename=AnyWay-{#AppVersion}-Windows-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\..\assets\app-icon.ico
 UninstallDisplayIcon={app}\WindowsLocationSimulator.exe
 
 [InstallDelete]

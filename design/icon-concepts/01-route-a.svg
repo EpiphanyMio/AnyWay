@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="AnyWay route A icon concept">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#155064"/>
+      <stop offset="1" stop-color="#092837"/>
+    </linearGradient>
+    <linearGradient id="route" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F1FFFA"/>
+      <stop offset="1" stop-color="#B8F3DE"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <path d="M268 752 474 315 Q512 238 550 315 L756 752"
+        fill="none" stroke="url(#route)" stroke-width="88"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M389 575 H635" fill="none" stroke="#46D8BB"
+        stroke-width="66" stroke-linecap="round"/>
+  <g fill="#0B3040">
+    <circle cx="268" cy="752" r="43"/>
+    <circle cx="512" cy="277" r="43"/>
+    <circle cx="756" cy="752" r="43"/>
+  </g>
+  <g fill="#FFC37C">
+    <circle cx="268" cy="752" r="25"/>
+    <circle cx="512" cy="277" r="25"/>
+    <circle cx="756" cy="752" r="25"/>
+  </g>
+</svg>

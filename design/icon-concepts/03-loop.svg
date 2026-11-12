@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="AnyWay loop route icon concept">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF7E9"/>
+      <stop offset="1" stop-color="#EDE7D8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#paper)"/>
+  <path d="M392 308H632C772 308 848 400 848 512S772 716 632 716H392C252 716 176 624 176 512S252 308 392 308Z"
+        fill="none" stroke="#174D50" stroke-width="76" stroke-linejoin="round"/>
+  <path d="M632 308C772 308 848 400 848 512"
+        fill="none" stroke="#DE6348" stroke-width="76" stroke-linecap="round"/>
+  <circle cx="392" cy="308" r="52" fill="#FFF7E9" stroke="#174D50" stroke-width="23"/>
+  <path d="M475 432L632 512L475 592Z" fill="#174D50"/>
+</svg>

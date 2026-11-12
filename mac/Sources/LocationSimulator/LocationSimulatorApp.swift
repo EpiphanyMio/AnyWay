@@ -12,11 +12,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct LocationSimulatorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @AppStorage("appearanceMode") private var appearanceMode = "system"
 
     var body: some Scene {
         WindowGroup("AnyWay") {
             ContentView()
                 .frame(minWidth: 980, minHeight: 690)
+                .preferredColorScheme(appearanceMode == "dark" ? .dark : appearanceMode == "light" ? .light : nil)
         }
     }
 }

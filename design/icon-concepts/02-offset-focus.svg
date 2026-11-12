@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="AnyWay offset focus icon concept">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#24255E"/>
+      <stop offset="1" stop-color="#0A3447"/>
+    </linearGradient>
+    <linearGradient id="movement" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ACA2FF"/>
+      <stop offset=".58" stop-color="#91BFFF"/>
+      <stop offset="1" stop-color="#78EBD1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#background)"/>
+
+  <!-- The faint concentric field adds depth without a blur that disappears at 64 px. -->
+  <circle cx="679" cy="350" r="213" fill="#75EAD2" opacity=".08"/>
+  <circle cx="679" cy="350" r="176" fill="#75EAD2" opacity=".06"/>
+
+  <!-- The route joins the former coordinate to the locked virtual coordinate. -->
+  <path d="M327 691 C476 723 454 460 679 350" fill="none"
+        stroke="#0D2244" stroke-width="93" stroke-linecap="round" opacity=".30"/>
+  <path d="M327 691 C476 723 454 460 679 350" fill="none"
+        stroke="url(#movement)" stroke-width="70" stroke-linecap="round"/>
+
+  <circle cx="327" cy="691" r="99" fill="#202954" stroke="#ACA3FF" stroke-width="37"/>
+  <circle cx="327" cy="691" r="28" fill="#F3F1FF"/>
+
+  <!-- The four bold cardinal strokes turn the endpoint into a GPS lock target. -->
+  <circle cx="679" cy="350" r="131" fill="#15364A" stroke="#86F0D7" stroke-width="29"/>
+  <g stroke="#A5F9E5" stroke-width="30" stroke-linecap="round">
+    <path d="M679 166V202 M679 498V534"/>
+    <path d="M495 350H531 M827 350H863"/>
+  </g>
+  <circle cx="679" cy="350" r="77" fill="#89EED9"/>
+  <circle cx="679" cy="350" r="29" fill="#103346"/>
+</svg>

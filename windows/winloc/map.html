@@ -1,7 +1,7 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>__LEAFLET_CSS__</style>
-<style>html,body,#map{height:100%;margin:0;background:#edf2f4}#notice{position:absolute;z-index:1000;bottom:12px;left:12px;background:rgba(255,255,255,.95);padding:8px 11px;font:12px sans-serif;border:1px solid #dce5eb;border-radius:8px;box-shadow:0 2px 9px #233f4d18}</style>
+<style>html,body,#map{height:100%;margin:0;background:#edf2f4}#notice{position:absolute;z-index:1000;bottom:12px;left:12px;background:rgba(255,255,255,.95);color:#1c2938;padding:8px 11px;font:12px sans-serif;border:1px solid #dce5eb;border-radius:8px;box-shadow:0 2px 9px #233f4d18}body.dark,#map.dark{background:#151b24}body.dark .leaflet-tile{filter:brightness(.7) invert(1) hue-rotate(180deg)}body.dark #notice{background:rgba(36,45,57,.96);color:#e3eaf0;border-color:#3b4a59}body.dark .leaflet-control-attribution{background:#242d39;color:#e3eaf0}body.dark .leaflet-control-attribution a{color:#9adbd2}</style>
 </head><body><div id="map"></div><div id="notice">© OpenStreetMap contributors</div>
 <script>__QWEBCHANNEL_JS__</script>
 <script>__LEAFLET_JS__</script>
@@ -68,6 +68,7 @@ function draw(points, preview, single, search, fit, editable) {
   if(fit&&points.length)map.fitBounds(L.latLngBounds(points.map(p=>[p.latitude,p.longitude])).pad(.2),{maxZoom:16});
 }
 function focus(lat,lon){if(map)map.setView([lat,lon],16)}
+function setTheme(dark){document.body.classList.toggle('dark',dark);document.getElementById('map').classList.toggle('dark',dark)}
 init();
 </script></body></html>
 

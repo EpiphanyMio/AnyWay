@@ -495,12 +495,41 @@ class MainWindow(QMainWindow):
             QComboBox::drop-down:hover { background: #e9f5f3; }
             QComboBox::drop-down:disabled { background: #edf1f4; }
             QComboBox::down-arrow { image: url("__COMBO_ARROW__"); width: 12px; height: 8px; }
+            QComboBox::down-arrow:disabled { image: url("__DISABLED_DOWN_ARROW__"); }
+            QSpinBox, QDoubleSpinBox { padding-right: 34px; }
+            QSpinBox::up-button, QDoubleSpinBox::up-button {
+                subcontrol-origin: padding; subcontrol-position: top right;
+                width: 30px; height: 15px; border: 0; border-left: 1px solid #cad6df;
+                border-top-right-radius: 9px; background: #f2f6f8; }
+            QSpinBox::down-button, QDoubleSpinBox::down-button {
+                subcontrol-origin: padding; subcontrol-position: bottom right;
+                width: 30px; height: 14px; border: 0; border-left: 1px solid #cad6df;
+                border-top: 1px solid #cad6df; border-bottom-right-radius: 9px;
+                background: #f2f6f8; }
+            QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+            QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+                background: #e9f5f3; }
+            QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed,
+            QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {
+                background: #d9f1ed; }
+            QSpinBox::up-button:disabled, QDoubleSpinBox::up-button:disabled,
+            QSpinBox::down-button:disabled, QDoubleSpinBox::down-button:disabled {
+                background: #edf1f4; }
+            QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+                image: url("__SPIN_UP_ARROW__"); width: 12px; height: 8px; }
+            QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+                image: url("__COMBO_ARROW__"); width: 12px; height: 8px; }
+            QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled {
+                image: url("__DISABLED_UP_ARROW__"); }
+            QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {
+                image: url("__DISABLED_DOWN_ARROW__"); }
             QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled,
             QSpinBox:disabled, QDoubleSpinBox:disabled, QListWidget:disabled {
                 color: #536675; background: #edf1f4; }
             QComboBox QAbstractItemView { color: #1c2938; background: #ffffff;
                                       selection-color: #075b55; selection-background-color: #d9f1ed; }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus { border: 1px solid #087f77; }
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
+            QSpinBox:focus, QDoubleSpinBox:focus { border: 1px solid #087f77; }
             QPushButton { color: #173042; background: #ffffff; border: 1px solid #cad6df;
                           border-radius: 12px; padding: 8px 14px; font-weight: 500; }
             QPushButton:hover { background: #e9f5f3; border-color: #78b8ae; }
@@ -519,7 +548,10 @@ class MainWindow(QMainWindow):
             QTabBar::tab:selected { background: #d9f1ed; color: #075b55; }
             QLabel#statusLabel { background: #e8f2f4; border-radius: 12px; padding: 9px 12px; }
             QLabel#noticeLabel { color: #657582; font-size: 11px; }
-        """.replace("__COMBO_ARROW__", (Path(__file__).with_name("combo_arrow.svg")).as_posix()))
+        """.replace("__COMBO_ARROW__", (Path(__file__).with_name("combo_arrow.svg")).as_posix())
+           .replace("__SPIN_UP_ARROW__", (Path(__file__).with_name("spin_up_arrow.svg")).as_posix())
+           .replace("__DISABLED_DOWN_ARROW__", (Path(__file__).with_name("down_arrow_disabled.svg")).as_posix())
+           .replace("__DISABLED_UP_ARROW__", (Path(__file__).with_name("spin_up_arrow_disabled.svg")).as_posix()))
 
     def _show_research_notice(self):
         QMessageBox.warning(self, "使用须知", RESEARCH_NOTICE, QMessageBox.Ok)

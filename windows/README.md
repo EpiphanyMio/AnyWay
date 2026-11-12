@@ -26,7 +26,7 @@ Windows 无法运行 Apple 的 Xcode iOS Simulator，因此 Mac 版的 iOS 模�
 
 ## 打包
 
-在 Windows PowerShell 执行 `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`。输出目录为 `dist\WindowsLocationSimulator`；这是目录式程序，需连同目录中的依赖一起分发。当前构建会附带控制台窗口，以便设备桥接进程通过标准输入输出通信并显示诊断信息。Android 功能还需要单独安装 ADB Platform-Tools 和下述手机配套 App。尚未在真实 Windows 主机和实体手机上完成端到端测试，分发前应在目标系统验证安装、发现设备、设置和清除定位、路线运行。程序未签名。
+在 Windows PowerShell 执行 `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`。输出目录为 `dist\WindowsLocationSimulator`；这是目录式程序，需连同目录中的依赖一起分发。桌面启动时会隐藏控制台窗口，同时保留设备桥接进程所需的标准输入输出。安装包默认安装到 `%LOCALAPPDATA%\Programs\AnyWay`。Android 功能还需要单独安装 ADB Platform-Tools 和下述手机配套 App。尚未在真实 Windows 主机和实体手机上完成端到端测试，分发前应在目标系统验证安装、发现设备、设置和清除定位、路线运行。程序未签名。
 
 ## iOS 实体设备
 

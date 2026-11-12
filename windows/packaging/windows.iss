@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.2"
+  #error AppVersion must be supplied from the root VERSION file
 #endif
 
 [Setup]
@@ -8,6 +8,7 @@ AppName=AnyWay
 AppVersion={#AppVersion}
 AppPublisher=AnyWay
 DefaultDirName={localappdata}\Programs\AnyWay
+UsePreviousAppDir=no
 DefaultGroupName=AnyWay
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible

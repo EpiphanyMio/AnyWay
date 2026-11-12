@@ -265,7 +265,8 @@ struct ContentView: View {
                 controller.status = "已添加第 \(points.count) 个路径点。"
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.quaternary))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.quaternary)
+                .allowsHitTesting(false))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack {
                 Button {

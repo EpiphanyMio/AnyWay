@@ -1,3 +1,4 @@
+import AppKit
 import MapKit
 import XCTest
 @testable import LocationSimulator
@@ -9,21 +10,42 @@ final class RouteTests: XCTestCase {
         XCTAssertNil(ReleaseVersion("0.1"))
     }
 
-    func testRouteMarkerCompletesDragAndReportsNewCoordinate() {
+    func testRoutePointMovesThroughMouseDownDragAndUp() throws {
+        let start = try Coordinate(latitude: 39.9, longitude: 116.4)
+        let end = try Coordinate(latitude: 39.901, longitude: 116.401)
+        var moved: (Int, Coordinate)?
+        var clicks = 0
+        let route = RouteMapView(points: [start, end], previewRoute: [], variationMeters: 0,
+                                 previewSeed: 1, fitRevision: 0, searchCoordinate: nil,
+                                 searchTitle: "", focusRevision: 0, singlePoint: nil,
+                                 editable: true, onPointMoved: { moved = ($0, $1) },
+                                 onMapClick: { _ in clicks += 1 })
+        let coordinator = RouteMapView.Coordinator(route)
+        let map = MKMapView(frame: NSRect(x: 0, y: 0, width: 600, height: 450))
+        map.setRegion(MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 39.9, longitude: 116.4),
+                                         span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)),
+                      animated: false)
+        coordinator.mapView = map
         let annotation = RoutePointAnnotation()
-        annotation.index = 2
-        annotation.coordinate = CLLocationCoordinate2D(latitude: 39.9, longitude: 116.4)
-        let marker = RouteMarkerView(annotation: annotation, reuseIdentifier: "RoutePoint")
-        var moved: RoutePointAnnotation?
-        marker.onDragFinished = { moved = $0 }
-        marker.setDragState(.starting, animated: false)
-        XCTAssertEqual(marker.dragState, .dragging)
-        annotation.coordinate = CLLocationCoordinate2D(latitude: 40.0, longitude: 116.5)
-        marker.setDragState(.ending, animated: false)
-        XCTAssertEqual(marker.dragState, .none)
-        XCTAssertEqual(moved?.index, 2)
-        XCTAssertEqual(moved?.coordinate.latitude, 40.0)
-        XCTAssertEqual(moved?.coordinate.longitude, 116.5)
+        annotation.index = 0
+        annotation.coordinate = CLLocationCoordinate2D(latitude: start.latitude, longitude: start.longitude)
+        map.addAnnotation(annotation)
+
+        let origin = map.convert(annotation.coordinate, toPointTo: map)
+        let destination = NSPoint(x: origin.x + 80, y: origin.y + 30)
+        XCTAssertTrue(coordinator.handleMouseInteraction(.leftMouseDown, at: origin, on: map))
+        XCTAssertTrue(coordinator.handleMouseInteraction(.leftMouseUp, at: origin, on: map))
+        XCTAssertNil(moved)
+
+        XCTAssertTrue(coordinator.handleMouseInteraction(.leftMouseDown, at: origin, on: map))
+        XCTAssertTrue(coordinator.handleMouseInteraction(.leftMouseDragged, at: destination, on: map))
+        XCTAssertTrue(coordinator.handleMouseInteraction(.leftMouseUp, at: destination, on: map))
+        let expected = map.convert(destination, toCoordinateFrom: map)
+        let result = try XCTUnwrap(moved)
+        XCTAssertEqual(result.0, 0)
+        XCTAssertEqual(result.1.latitude, expected.latitude, accuracy: 0.000001)
+        XCTAssertEqual(result.1.longitude, expected.longitude, accuracy: 0.000001)
+        XCTAssertEqual(clicks, 0)
     }
 
     func testParserReportsLineAndRejectsOutOfRangeCoordinate() throws {

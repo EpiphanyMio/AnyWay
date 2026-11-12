@@ -6,26 +6,6 @@ final class RoutePointAnnotation: MKPointAnnotation { var index = 0 }
 final class SearchPointAnnotation: MKPointAnnotation {}
 final class SinglePointAnnotation: MKPointAnnotation {}
 
-/// MapKit asks a custom annotation view to complete each drag-state transition.
-final class RouteMarkerView: MKMarkerAnnotationView {
-    var onDragFinished: ((RoutePointAnnotation) -> Void)?
-
-    override func setDragState(_ newDragState: MKAnnotationView.DragState, animated: Bool) {
-        switch newDragState {
-        case .starting:
-            super.setDragState(.dragging, animated: animated)
-        case .ending:
-            let point = annotation as? RoutePointAnnotation
-            super.setDragState(.none, animated: animated)
-            if let point { onDragFinished?(point) }
-        case .canceling:
-            super.setDragState(.none, animated: animated)
-        default:
-            super.setDragState(newDragState, animated: animated)
-        }
-    }
-}
-
 struct RouteMapView: NSViewRepresentable {
     let points: [Coordinate]
     let previewRoute: [Coordinate]
@@ -64,6 +44,7 @@ struct RouteMapView: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.parent = self
         if coordinator.renderedPoints != points {
+            coordinator.cancelDrag()
             coordinator.renderedPoints = points
             map.removeAnnotations(map.annotations.filter { $0 is RoutePointAnnotation })
             for (index, point) in points.enumerated() {
@@ -77,9 +58,7 @@ struct RouteMapView: NSViewRepresentable {
         }
         if coordinator.renderedEditable != editable {
             coordinator.renderedEditable = editable
-            for annotation in map.annotations where annotation is RoutePointAnnotation {
-                map.view(for: annotation)?.isDraggable = editable
-            }
+            if !editable { coordinator.cancelDrag() }
         }
         if coordinator.renderedSearchCoordinate != searchCoordinate
             || coordinator.renderedSearchTitle != searchTitle {
@@ -169,6 +148,10 @@ struct RouteMapView: NSViewRepresentable {
         var lastFocusRevision = -1
         private var clickMonitor: Any?
         private var mouseDownLocation: NSPoint?
+        private var draggedAnnotation: RoutePointAnnotation?
+        private var dragStartLocation: NSPoint?
+        private var dragStartCoordinate: CLLocationCoordinate2D?
+        private var didMoveDraggedAnnotation = false
 
         init(_ parent: RouteMapView) { self.parent = parent }
 
@@ -178,8 +161,7 @@ struct RouteMapView: NSViewRepresentable {
             clickMonitor = NSEvent.addLocalMonitorForEvents(
                 matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
             ) { [weak self] event in
-                self?.handleMouseEvent(event)
-                return event
+                self?.handleMouseEvent(event) == true ? nil : event
             }
         }
 
@@ -187,32 +169,144 @@ struct RouteMapView: NSViewRepresentable {
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
             clickMonitor = nil
             mouseDownLocation = nil
+            cancelDrag()
         }
 
-        private func handleMouseEvent(_ event: NSEvent) {
+        private func handleMouseEvent(_ event: NSEvent) -> Bool {
             guard let map = mapView, event.window === map.window else {
                 mouseDownLocation = nil
-                return
+                cancelDrag()
+                return false
             }
             let location = map.convert(event.locationInWindow, from: nil)
-            switch event.type {
+            return handleMouseInteraction(event.type, at: location, on: map,
+                                          clickCount: event.clickCount)
+        }
+
+        /// Handle route-marker dragging before MapKit can interpret the same mouse
+        /// movement as a map pan. The local monitor also works when a SwiftUI view
+        /// above the map receives the original mouse event.
+        @discardableResult
+        func handleMouseInteraction(_ type: NSEvent.EventType, at location: NSPoint,
+                                    on map: MKMapView, clickCount: Int = 1) -> Bool {
+            switch type {
             case .leftMouseDown:
-                mouseDownLocation = map.bounds.contains(location) && event.clickCount == 1
-                    ? location : nil
+                if parent.editable, map.bounds.contains(location), clickCount == 1,
+                   let annotation = routeAnnotation(at: location, on: map) {
+                    draggedAnnotation = annotation
+                    dragStartCoordinate = annotation.coordinate
+                    dragStartLocation = location
+                    didMoveDraggedAnnotation = false
+                    mouseDownLocation = nil
+                    return true
+                }
+                mouseDownLocation = map.bounds.contains(location) && clickCount == 1 ? location : nil
             case .leftMouseDragged:
+                if let annotation = draggedAnnotation {
+                    if let start = dragStartLocation,
+                       hypot(location.x - start.x, location.y - start.y) > 4 {
+                        didMoveDraggedAnnotation = true
+                    }
+                    if didMoveDraggedAnnotation,
+                       let point = coordinate(at: location, on: map) {
+                        annotation.coordinate = point
+                        showDraggingRoute(on: map, moving: annotation)
+                    }
+                    return true
+                }
                 if let down = mouseDownLocation,
                    hypot(location.x - down.x, location.y - down.y) > 5 {
                     mouseDownLocation = nil
                 }
             case .leftMouseUp:
-                guard let down = mouseDownLocation else { return }
+                if let annotation = draggedAnnotation {
+                    if didMoveDraggedAnnotation, map.bounds.contains(location),
+                       let point = coordinate(at: location, on: map) {
+                        annotation.coordinate = point
+                        finishDrag(annotation)
+                    } else {
+                        annotation.coordinate = dragStartCoordinate ?? annotation.coordinate
+                        restoreRoutePreview(on: map)
+                    }
+                    clearDrag()
+                    return true
+                }
+                guard let down = mouseDownLocation else { return false }
                 mouseDownLocation = nil
                 guard map.bounds.contains(location),
-                      hypot(location.x - down.x, location.y - down.y) <= 5 else { return }
+                      hypot(location.x - down.x, location.y - down.y) <= 5 else { return false }
                 addPoint(at: location, on: map)
             default:
                 break
             }
+            return false
+        }
+
+        private func routeAnnotation(at location: NSPoint, on map: MKMapView) -> RoutePointAnnotation? {
+            let candidates = map.annotations.compactMap { $0 as? RoutePointAnnotation }
+            return candidates.filter { annotation in
+                let anchor = map.convert(annotation.coordinate, toPointTo: map)
+                let distance = hypot(location.x - anchor.x, location.y - anchor.y)
+                if let view = map.view(for: annotation) {
+                    let frame = view.convert(view.bounds, to: map).insetBy(dx: -6, dy: -6)
+                    return frame.contains(location) || distance <= 18
+                }
+                return distance <= 26
+            }.min { a, b in
+                let first = map.convert(a.coordinate, toPointTo: map)
+                let second = map.convert(b.coordinate, toPointTo: map)
+                return hypot(location.x - first.x, location.y - first.y)
+                    < hypot(location.x - second.x, location.y - second.y)
+            }
+        }
+
+        private func coordinate(at location: NSPoint, on map: MKMapView) -> CLLocationCoordinate2D? {
+            let coordinate = map.convert(location, toCoordinateFrom: map)
+            guard (try? Coordinate(latitude: coordinate.latitude,
+                                   longitude: coordinate.longitude)) != nil else { return nil }
+            return coordinate
+        }
+
+        private func showDraggingRoute(on map: MKMapView, moving annotation: RoutePointAnnotation) {
+            guard parent.points.count > 1, parent.points.indices.contains(annotation.index) else { return }
+            var coordinates = parent.points.map {
+                CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+            }
+            coordinates[annotation.index] = annotation.coordinate
+            if coordinates.last?.latitude != coordinates.first?.latitude
+                || coordinates.last?.longitude != coordinates.first?.longitude {
+                coordinates.append(coordinates[0])
+            }
+            map.removeOverlays(map.overlays)
+            map.addOverlay(MKPolyline(coordinates: coordinates, count: coordinates.count))
+        }
+
+        private func restoreRoutePreview(on map: MKMapView) {
+            let route = parent.previewRoute.isEmpty ? RouteLoop.closed(parent.points) : parent.previewRoute
+            let samples = RoutePreview.sample(points: route, variationMeters: parent.variationMeters,
+                                              seed: parent.previewSeed)
+            map.removeOverlays(map.overlays)
+            if samples.count >= 2 {
+                let coordinates = samples.map {
+                    CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                }
+                map.addOverlay(MKPolyline(coordinates: coordinates, count: coordinates.count))
+            }
+        }
+
+        private func clearDrag() {
+            draggedAnnotation = nil
+            dragStartCoordinate = nil
+            dragStartLocation = nil
+            didMoveDraggedAnnotation = false
+        }
+
+        func cancelDrag() {
+            if let annotation = draggedAnnotation, let original = dragStartCoordinate {
+                annotation.coordinate = original
+                if let map = mapView { restoreRoutePreview(on: map) }
+            }
+            clearDrag()
         }
 
         private func addPoint(at location: NSPoint, on map: MKMapView) {
@@ -252,21 +346,15 @@ struct RouteMapView: NSViewRepresentable {
             let isSearch = annotation is SearchPointAnnotation
             let isSinglePoint = annotation is SinglePointAnnotation
             let identifier = isSearch ? "SearchPoint" : (isSinglePoint ? "SinglePoint" : "RoutePoint")
-            let view: MKMarkerAnnotationView
-            if annotation is RoutePointAnnotation {
-                let routeView = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? RouteMarkerView)
-                    ?? RouteMarkerView(annotation: annotation, reuseIdentifier: identifier)
-                routeView.onDragFinished = { [weak self] point in self?.finishDrag(point) }
-                view = routeView
-            } else {
-                view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
-                    ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
-            }
+            let view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView)
+                ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
             view.annotation = annotation
             view.markerTintColor = isSearch ? .systemOrange : (isSinglePoint ? .systemPurple : .systemTeal)
             view.glyphText = isSearch ? "⌕" : (isSinglePoint ? "◎" : (annotation.title ?? "•"))
             view.canShowCallout = isSearch || isSinglePoint
-            view.isDraggable = annotation is RoutePointAnnotation && parent.editable
+            // The coordinator handles mouse dragging so MapKit cannot pan the map
+            // instead of moving a marker.
+            view.isDraggable = false
             return view
         }
     }

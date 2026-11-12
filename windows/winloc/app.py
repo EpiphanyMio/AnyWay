@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -85,6 +85,47 @@ class UpdateRequiredDialog(QDialog):
 
     def closeEvent(self, event):
         event.ignore()
+
+
+class _ClickToWheelSpinBox:
+    """Let the sidebar scroll until the user clicks this particular spin box."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._wheel_enabled = False
+        self._editor = self.findChild(QLineEdit)
+        self._editor.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if watched is self._editor:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._wheel_enabled = True
+            elif event.type() == QEvent.Type.FocusOut:
+                self._wheel_enabled = False
+        return super().eventFilter(watched, event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._wheel_enabled = True
+        super().mousePressEvent(event)
+
+    def focusOutEvent(self, event):
+        self._wheel_enabled = False
+        super().focusOutEvent(event)
+
+    def wheelEvent(self, event):
+        if self._wheel_enabled and self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class ClickToWheelSpinBox(_ClickToWheelSpinBox, QSpinBox):
+    pass
+
+
+class ClickToWheelDoubleSpinBox(_ClickToWheelSpinBox, QDoubleSpinBox):
+    pass
 
 
 class MapBridge(QObject):
@@ -362,13 +403,13 @@ class MainWindow(QMainWindow):
 
         params = self._box("移动参数", side)
         form = QFormLayout()
-        self.speed = QDoubleSpinBox()
+        self.speed = ClickToWheelDoubleSpinBox()
         self.speed.setRange(.01, 100)
         self.speed.setDecimals(3)
         self.speed.setValue(5)
         self.speed.valueChanged.connect(self._sync_pace)
         form.addRow("速度 m/s", self.speed)
-        self.pace_min, self.pace_sec = QSpinBox(), QSpinBox()
+        self.pace_min, self.pace_sec = ClickToWheelSpinBox(), ClickToWheelSpinBox()
         self.pace_min.setRange(0, 999)
         self.pace_sec.setRange(0, 59)
         self.pace_min.setValue(3)
@@ -377,15 +418,15 @@ class MainWindow(QMainWindow):
         self.pace_sec.valueChanged.connect(self._sync_speed)
         form.addRow("配速 分/公里", self.pace_min)
         form.addRow("配速 秒/公里", self.pace_sec)
-        self.jitter = QDoubleSpinBox()
+        self.jitter = ClickToWheelDoubleSpinBox()
         self.jitter.setRange(0, 100)
         self.jitter.setValue(15)
         form.addRow("速度抖动 ±%", self.jitter)
-        self.passes = QSpinBox()
+        self.passes = ClickToWheelSpinBox()
         self.passes.setRange(1, 1000)
         self.passes.setValue(2)
         form.addRow("圈数", self.passes)
-        self.variation = QDoubleSpinBox()
+        self.variation = ClickToWheelDoubleSpinBox()
         self.variation.setRange(0, 20)
         self.variation.setValue(2)
         self.variation.valueChanged.connect(lambda: self.draw_map(False))
@@ -402,17 +443,17 @@ class MainWindow(QMainWindow):
             self.preset.addItem(name, key)
         params.addWidget(self.preset)
         custom = QFormLayout()
-        self.interval = QDoubleSpinBox()
+        self.interval = ClickToWheelDoubleSpinBox()
         self.interval.setRange(.1, 20)
         self.interval.setValue(.8)
         custom.addRow("低速间隔 km", self.interval)
-        self.low_min, self.low_sec = QSpinBox(), QSpinBox()
+        self.low_min, self.low_sec = ClickToWheelSpinBox(), ClickToWheelSpinBox()
         self.low_min.setRange(1, 60)
         self.low_min.setValue(10)
         self.low_sec.setRange(0, 59)
         custom.addRow("低速配速 分/公里", self.low_min)
         custom.addRow("低速配速 秒/公里", self.low_sec)
-        self.recovery = QDoubleSpinBox()
+        self.recovery = ClickToWheelDoubleSpinBox()
         self.recovery.setRange(5, 300)
         self.recovery.setValue(25)
         custom.addRow("低速持续秒数", self.recovery)
@@ -446,6 +487,14 @@ class MainWindow(QMainWindow):
             QLineEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QListWidget {
                 color: #1c2938; background: #ffffff; border: 1px solid #cad6df; border-radius: 10px;
                 padding: 5px 7px; selection-background-color: #c8ece8; }
+            QComboBox { padding-right: 34px; }
+            QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: top right;
+                                   width: 30px; border: 0; border-left: 1px solid #cad6df;
+                                   border-top-right-radius: 9px; border-bottom-right-radius: 9px;
+                                   background: #f2f6f8; }
+            QComboBox::drop-down:hover { background: #e9f5f3; }
+            QComboBox::drop-down:disabled { background: #edf1f4; }
+            QComboBox::down-arrow { image: url("__COMBO_ARROW__"); width: 12px; height: 8px; }
             QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled,
             QSpinBox:disabled, QDoubleSpinBox:disabled, QListWidget:disabled {
                 color: #536675; background: #edf1f4; }
@@ -470,7 +519,7 @@ class MainWindow(QMainWindow):
             QTabBar::tab:selected { background: #d9f1ed; color: #075b55; }
             QLabel#statusLabel { background: #e8f2f4; border-radius: 12px; padding: 9px 12px; }
             QLabel#noticeLabel { color: #657582; font-size: 11px; }
-        """)
+        """.replace("__COMBO_ARROW__", (Path(__file__).with_name("combo_arrow.svg")).as_posix()))
 
     def _show_research_notice(self):
         QMessageBox.warning(self, "使用须知", RESEARCH_NOTICE, QMessageBox.Ok)

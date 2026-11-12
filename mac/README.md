@@ -57,7 +57,7 @@ Android 配套 App 通过系统测试定位接口注入 GPS 坐标。Mac 应用�
 ## 安装包
 
 在 Apple Silicon Mac 上运行 `bash scripts/build-pkg.sh`，生成
-`dist/AnyWay-0.1.1-arm64.pkg` 和对应的 `.sha256` 校验文件。把安装包复制到另一台 Apple Silicon Mac 后双击安装，应用会放在“应用程序”文件夹。安装包内包含 iPhone 支持组件，目标电脑无需运行 Python 安装脚本；运行模拟器定位仍需在目标电脑安装 Xcode，实体 iPhone 还需开启开发者模式并完成信任与配对。
+`dist/AnyWay-<VERSION>-arm64.pkg` 和对应的 `.sha256` 校验文件，其中 `<VERSION>` 取自仓库根目录的 `VERSION`。把安装包复制到另一台 Apple Silicon Mac 后双击安装，应用会放在“应用程序”文件夹。安装包内包含 iPhone 支持组件，目标电脑无需运行 Python 安装脚本；运行模拟器定位仍需在目标电脑安装 Xcode，实体 iPhone 还需开启开发者模式并完成信任与配对。
 
 目前安装包未使用 Apple Developer ID 签名或公证。若 macOS 拦截从网络下载的安装包，请在“系统设置 → 隐私与安全性”中允许打开；正式公开分发建议使用 Developer ID Installer 证书签名并公证。
 

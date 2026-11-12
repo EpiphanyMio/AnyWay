@@ -13,10 +13,11 @@ $filteredPath = foreach ($entry in ($env:PATH -split ';')) {
   $entry
 }
 $env:PATH = $filteredPath -join ';'
-& .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --name WindowsLocationSimulator `
+& .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --hide-console hide-early --name WindowsLocationSimulator `
   --runtime-hook scripts\pyi_rth_qt_dll.py `
   --collect-all pymobiledevice3 --collect-all pytun_pmd3 --collect-all PySide6.QtWebEngineCore `
   --add-data "winloc\map.html;winloc" --add-data "winloc\qwebchannel.js;winloc" `
+  --add-data "winloc\combo_arrow.svg;winloc" `
   --add-data "..\VERSION;." `
   --add-data "winloc\vendor;winloc\vendor" --add-data "winloc\iphone_bridge.py;winloc" `
   --paths . launcher.py

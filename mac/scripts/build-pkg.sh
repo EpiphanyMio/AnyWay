@@ -22,8 +22,29 @@ codesign --verify --deep --strict "$app_dir"
 output_dir="$PWD/dist"
 mkdir -p "$output_dir"
 pkg_name="AnyWay-$version-arm64.pkg"
+# Stage the app as the package root and disable bundle relocation. Otherwise
+# Installer may update an older copy outside /Applications instead of placing
+# the new app in /Applications.
+staging_dir="$(mktemp -d "$PWD/.build/package.XXXXXX")"
+trap 'rm -rf "$staging_dir"' EXIT
+mkdir -p "$staging_dir/root"
+ditto "$app_dir" "$staging_dir/root/AnyWay.app"
+cat > "$staging_dir/components.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+  <dict>
+    <key>RootRelativeBundlePath</key><string>AnyWay.app</string>
+    <key>BundleIsRelocatable</key><false/>
+    <key>BundleOverwriteAction</key><string>upgrade</string>
+  </dict>
+</array>
+</plist>
+PLIST
 pkgbuild \
-    --component "$app_dir" \
+    --root "$staging_dir/root" \
+    --component-plist "$staging_dir/components.plist" \
     --install-location /Applications \
     --identifier local.LocationSimulator.pkg \
     --version "$version" \

@@ -35,6 +35,12 @@ jobs:
       - name: Build Mac package
         working-directory: mac
         run: bash scripts/build-pkg.sh
+      - name: Verify Mac package installation
+        run: |
+          sudo installer -pkg "mac/dist/AnyWay-$(cat VERSION)-arm64.pkg" -target /
+          test -d /Applications/AnyWay.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' /Applications/AnyWay.app/Contents/Info.plist)" = "$(cat VERSION)"
+          codesign --verify --deep --strict /Applications/AnyWay.app
       - name: Name Mac assets
         run: |
           version="$(cat VERSION)"
@@ -66,6 +72,10 @@ jobs:
       - name: Verify product version
         shell: pwsh
         run: python scripts/check_versions.py
+      - name: Install Windows test dependencies
+        working-directory: windows
+        shell: pwsh
+        run: python -m pip install -r requirements.txt
       - name: Test Windows application
         working-directory: windows
         shell: pwsh
@@ -86,8 +96,20 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
+          $version = (Get-Content VERSION -Raw).Trim()
           choco install innosetup --yes --no-progress
-          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' windows/packaging/windows.iss
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DAppVersion=$version" windows/packaging/windows.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Windows installer installation
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $installer = "windows/dist/release/AnyWay-$version-Windows-Setup.exe"
+          $result = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait -PassThru -WindowStyle Hidden
+          if ($result.ExitCode -ne 0) { exit $result.ExitCode }
+          $installedApp = Join-Path $env:LOCALAPPDATA 'Programs\AnyWay\WindowsLocationSimulator.exe'
+          if (-not (Test-Path $installedApp)) { throw "Installer did not place AnyWay in $installedApp" }
+          & $installedApp --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Name Windows assets
         shell: pwsh

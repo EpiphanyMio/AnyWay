@@ -11,7 +11,10 @@ checks = {
     "mac/scripts/build-pkg.sh": ("AnyWay-$version-arm64.pkg",),
     "mac/android/app/build.gradle": ("../../VERSION", "versionCode (versionParts[0]", "versionName productVersion"),
     "windows/android-companion/app/build.gradle.kts": ("../../VERSION", "versionCode = versionParts[0]", "versionName = productVersion"),
-    "windows/packaging/windows.iss": (f'#define AppVersion "{version}"', "AnyWay-{#AppVersion}-Windows-Setup"),
+    "windows/packaging/windows.iss": ("#error AppVersion must be supplied from the root VERSION file",
+                                      "AnyWay-{#AppVersion}-Windows-Setup"),
+    ".github/workflows/release.yml": ("$version = (Get-Content VERSION -Raw).Trim()",
+                                      '"/DAppVersion=$version" windows/packaging/windows.iss'),
 }
 for path, markers in checks.items():
     content = (root / path).read_text(encoding="utf-8")

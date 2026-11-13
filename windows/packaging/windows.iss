@@ -19,22 +19,23 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=..\..\assets\app-icon.ico
-UninstallDisplayIcon={app}\WindowsLocationSimulator.exe
+UninstallDisplayIcon={app}\AnyWay.exe
 
 [InstallDelete]
-Type: files; Name: "{app}\_internal\icuuc.dll"
-Type: files; Name: "{app}\_internal\icudt78.dll"
+Type: files; Name: "{app}\WindowsLocationSimulator.exe"
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\runtime"
 
 [Files]
-Source: "..\dist\WindowsLocationSimulator\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\AnyWay\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\AnyWay"; Filename: "{app}\WindowsLocationSimulator.exe"
-Name: "{autodesktop}\AnyWay"; Filename: "{app}\WindowsLocationSimulator.exe"; Tasks: desktopicon
+Name: "{group}\AnyWay"; Filename: "{app}\AnyWay.exe"; IconFilename: "{app}\AnyWay.exe"
+Name: "{autodesktop}\AnyWay"; Filename: "{app}\AnyWay.exe"; IconFilename: "{app}\AnyWay.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Run]
-Filename: "{app}\WindowsLocationSimulator.exe"; Description: "Launch AnyWay"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\AnyWay.exe"; Description: "Launch AnyWay"; Flags: nowait postinstall skipifsilent
 

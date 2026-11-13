@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "WindowsLocationSimulatorCompanion"
+rootProject.name = "AnyWayCompanion"
 include(":app")

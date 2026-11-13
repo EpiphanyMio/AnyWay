@@ -1,4 +1,4 @@
-package com.locationsimulator.mock;
+package com.anyway.mac.mock;
 
 import android.app.AppOpsManager;
 import android.content.Context;
@@ -22,7 +22,7 @@ final class MockLocation {
             throw new IllegalArgumentException("无效的经纬度");
         }
         if (!isSelected(context)) {
-            throw new SecurityException("请在 Android 开发者选项中选择「定位模拟器」作为模拟位置信息应用");
+            throw new SecurityException("请在 Android 开发者选项中选择「AnyWay」作为模拟位置信息应用");
         }
         LocationManager manager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
         if (manager == null) throw new IllegalStateException("定位服务不可用");

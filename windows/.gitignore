@@ -5,6 +5,7 @@ __pycache__/
 build/
 dist/
 *.spec
+!AnyWay.spec
 android-companion/.gradle/
 android-companion/local.properties
 android-companion/app/build/

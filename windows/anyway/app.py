@@ -1,9 +1,8 @@
-"""Windows desktop UI. Run with `python -m winloc.app`."""
+"""Windows desktop UI. Run with `python -m anyway.app`."""
 from __future__ import annotations
 
 from dataclasses import asdict
 import json
-import os
 from pathlib import Path
 import random
 import sys
@@ -31,10 +30,8 @@ from .driver_check import (DriverReport, install_apple_devices,
 from .harmony import (HarmonyBridge, configure_hdc,
                       connected_devices as connected_harmony_devices,
                       harmony_usb_connected)
+from .user_data import APP_DIR, DRAFT, SETTINGS, migrate_legacy_data
 
-APP_DIR = Path(os.getenv("APPDATA") or Path.home() / ".config") / "WindowsLocationSimulator"
-SETTINGS = APP_DIR / "settings.json"
-DRAFT = APP_DIR / "draft.json"
 RESEARCH_NOTICE = ("本软件仅用于研究学习 Apple Developer Toolkit 和 Android Debug Bridge，禁止用于作弊、造假等任何非法行为。"
                    "下载学习后请于 24 小时内删除本软件。使用者因不当使用造成的不良影响由本人自行承担，与开发者无关。")
 
@@ -1171,6 +1168,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    migrate_legacy_data()
     app = QApplication(sys.argv)
     resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
     app.setWindowIcon(QIcon(str(resource_root / "assets" / "app-icon.png")))

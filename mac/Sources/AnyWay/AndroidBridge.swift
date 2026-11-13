@@ -1,7 +1,7 @@
 import Foundation
 
 enum AndroidBridge {
-    private static let component = "com.locationsimulator.mock/.LocationReceiver"
+    private static let component = "com.anyway.mac.mock/.LocationReceiver"
 
     private static var adbURL: URL? {
         let environment = ProcessInfo.processInfo.environment

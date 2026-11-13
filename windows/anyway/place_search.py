@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 from .core import Coordinate
 
-USER_AGENT = "WindowsLocationSimulator/0.1 (desktop location testing app)"
+USER_AGENT = "AnyWay/0.1 (desktop location testing app)"
 
 
 def search_places(query: str) -> list[dict]:

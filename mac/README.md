@@ -5,7 +5,7 @@
 ## Xcode 26.3 中运行
 
 1. 安装 Xcode 26.3，并在 Xcode 的 **Settings → Platforms** 安装所需的 iOS Simulator runtime。首次启动 Xcode 时完成组件安装。
-2. 用 Xcode 打开本目录的 `Package.swift`，选择 **LocationSimulator** scheme，运行目标选 **My Mac**，按 **⌘R**。
+2. 用 Xcode 打开本目录的 `Package.swift`，选择 **AnyWay** scheme，运行目标选 **My Mac**，按 **⌘R**。
 3. 在 Xcode 中启动一个 iOS 模拟器（**Window → Devices and Simulators**，或先运行任意 iOS 项目）。回到定位模拟器，点击“刷新”。
 4. 选中设备后，在“单点定位”中点击“在地图上选点”，再单击左侧地图选择位置；坐标会自动填入，点击“设置定位”即可生效。也可直接输入坐标，或搜索地点后点击“设为单点”。路径绘制时退出地图选点，在地图上依次单击至少两个点，设置参数后点击“开始模拟”。也可以切到“坐标文本”，每行输入一个 `纬度,经度` 并点击“应用到地图”。
 5. “停止”会保留当前坐标；“清除定位”会让模拟器恢复默认定位行为。
@@ -24,9 +24,11 @@
 
 Android 支持位于独立的 [`android/`](android/) 工程，Mac 端使用 Android SDK Platform-Tools 的 `adb` 与它通信。支持 Android 8.0（API 26）及以上的未 root 设备。使用前在 Mac 安装 Platform-Tools，并在 Android Studio 中打开 `android/`、使用 Gradle 8.9 和 JDK 17 构建 Debug APK。构建产物位于 `android/app/build/outputs/apk/debug/app-debug.apk`。连接并信任开启 USB 调试的设备后，可运行 `bash android/install.sh 设备序列号` 安装；序列号由 `adb devices` 查看。也可以直接在 Android Studio 中安装运行。
 
-在设备上打开“定位模拟器”，进入系统开发者选项，把它选为“模拟位置信息应用”，并保持系统定位开启。回到 Mac 应用点击“刷新”，选择带有 Android 标记的设备，即可使用现有的单点、路径和清除定位。若有多台设备，Mac 应用会使用各自的 ADB 序列号定向发送。`scripts/build-app.sh` 会在 APK 已构建时把它一并放入 Mac 应用的 `Contents/Resources/LocationSimulator-Android.apk`，方便分发安装。
+在设备上打开“AnyWay”，进入系统开发者选项，把它选为“模拟位置信息应用”，并保持系统定位开启。回到 Mac 应用点击“刷新”，选择带有 Android 标记的设备，即可使用现有的单点、路径和清除定位。若有多台设备，Mac 应用会使用各自的 ADB 序列号定向发送。`scripts/build-app.sh` 会在 APK 已构建时把它一并放入 Mac 应用的 `Contents/Resources/AnyWay-Android.apk`，方便分发安装。
 
 Android 配套 App 通过系统测试定位接口注入 GPS 坐标。Mac 应用调用 ADB 显式广播，接收端仅允许具备系统 `DUMP` 权限的发送者，普通第三方 App 不能直接发送定位命令。停止路径后定位停留在最后一点；点击“清除定位”会删除测试定位提供者。设备可能将该坐标标记为模拟位置，部分应用会拒绝或忽略它。无需 root，亦无法绕过应用的模拟位置检测。
+
+此次配套 App 的包名改为 AnyWay 标识。若手机已安装旧版配套 App，请先在手机设置中卸载旧版，再安装新版，并在开发者选项中重新选择新版模拟位置应用。
 
 ## 使用指南
 

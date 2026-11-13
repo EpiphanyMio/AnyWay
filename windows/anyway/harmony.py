@@ -97,7 +97,7 @@ def connected_devices() -> list[str]:
 def gpx(points: list[Coordinate]) -> bytes:
     if not 1 <= len(points) <= MAX_POINTS:
         raise ValueError("HarmonyOS GPX 路线须包含 1～1000 个位置点。")
-    root = ET.Element("gpx", {"version": "1.1", "creator": "WinLS",
+    root = ET.Element("gpx", {"version": "1.1", "creator": "AnyWay",
                               "xmlns": "http://www.topografix.com/GPX/1/1"})
     if len(points) == 1:
         ET.SubElement(root, "wpt", lat=f"{points[0].latitude:.8f}", lon=f"{points[0].longitude:.8f}")
@@ -155,7 +155,7 @@ class HarmonyBridge:
         if not 1 <= interval <= MAX_INTERVAL:
             raise ValueError("HarmonyOS 位置更新间隔须为 1～3600 秒。")
         local_path = None
-        remote = "/data/local/tmp/winls-" + hashlib.sha256(serial.encode()).hexdigest()[:12] + ".gpx"
+        remote = "/data/local/tmp/anyway-" + hashlib.sha256(serial.encode()).hexdigest()[:12] + ".gpx"
         with self._lock:
             try:
                 with tempfile.NamedTemporaryFile(suffix=".gpx", delete=False) as file:

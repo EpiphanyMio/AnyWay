@@ -7,11 +7,11 @@ val productVersion = rootProject.file("../../VERSION").readText().trim()
 val versionParts = productVersion.split('.').map(String::toInt)
 
 android {
-    namespace = "com.windowslocationsimulator.mock"
+    namespace = "com.anyway.windows.mock"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.windowslocationsimulator.mock"
+        applicationId = "com.anyway.windows.mock"
         minSdk = 26
         targetSdk = 35
         versionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]

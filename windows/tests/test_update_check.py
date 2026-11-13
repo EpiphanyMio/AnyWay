@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from winloc.update_check import UpdateResult, check_update, current_version, parse_version
+from anyway.update_check import UpdateResult, check_update, current_version, parse_version
 
 
 class UpdateCheckTests(unittest.TestCase):
@@ -14,14 +14,14 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertFalse(UpdateResult("0.1.10", "0.1.9", "url").required)
 
     def test_latest_release_requires_update(self):
-        with patch("winloc.update_check.urlopen",
+        with patch("anyway.update_check.urlopen",
                    return_value=io.BytesIO(json.dumps({"tag_name": "v0.1.2"}).encode())):
             result = check_update("0.1.1")
         self.assertTrue(result.required)
         self.assertTrue(result.release_url.endswith("/v0.1.2"))
 
     def test_offline_check_does_not_require_update(self):
-        with patch("winloc.update_check.urlopen", side_effect=OSError("offline")):
+        with patch("anyway.update_check.urlopen", side_effect=OSError("offline")):
             result = check_update("0.1.1")
         self.assertFalse(result.required)
         self.assertIn("offline", result.error)

@@ -7,24 +7,17 @@ export CLANG_MODULE_CACHE_PATH="$PWD/.build/ModuleCache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/ModuleCache"
 swift build -c release --disable-sandbox --cache-path .build/cache
 bin_dir="$(swift build -c release --disable-sandbox --cache-path .build/cache --show-bin-path)"
-app_dir="$PWD/.build/AnyWay.app"
+app_dir="${ANYWAY_APP_DIR:-$PWD/.build/AnyWay.app}"
+rm -rf "$app_dir"
 mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
-cp "$bin_dir/LocationSimulator" "$app_dir/Contents/MacOS/LocationSimulator"
+cp "$bin_dir/AnyWay" "$app_dir/Contents/MacOS/AnyWay"
 cp scripts/iphone_location_bridge.py "$app_dir/Contents/Resources/iphone_location_bridge.py"
-iconset_dir="$PWD/.build/AnyWay.iconset"
-mkdir -p "$iconset_dir"
-for size in 16 32 128 256 512; do
-    sips -s format png -z "$size" "$size" ../assets/app-icon.png \
-        --out "$iconset_dir/icon_${size}x${size}.png" >/dev/null
-    doubled=$((size * 2))
-    sips -s format png -z "$doubled" "$doubled" ../assets/app-icon.png \
-        --out "$iconset_dir/icon_${size}x${size}@2x.png" >/dev/null
-done
-iconutil -c icns "$iconset_dir" -o "$app_dir/Contents/Resources/AnyWay.icns"
+python3 ../scripts/build_icns.py ../assets/app-icon-macos.png \
+    "$app_dir/Contents/Resources/AnyWay.icns"
 if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
     cp android/app/build/outputs/apk/debug/app-debug.apk \
-        "$app_dir/Contents/Resources/LocationSimulator-Android.apk"
+        "$app_dir/Contents/Resources/AnyWay-Android.apk"
 fi
 bundled_venv="$app_dir/Contents/Resources/iphone-venv"
 rm -rf "$bundled_venv"
@@ -51,8 +44,8 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key><string>LocationSimulator</string>
-    <key>CFBundleIdentifier</key><string>local.LocationSimulator</string>
+    <key>CFBundleExecutable</key><string>AnyWay</string>
+    <key>CFBundleIdentifier</key><string>local.AnyWay</string>
     <key>CFBundleName</key><string>AnyWay</string>
     <key>CFBundleDisplayName</key><string>AnyWay</string>
     <key>CFBundleIconFile</key><string>AnyWay.icns</string>

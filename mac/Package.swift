@@ -4,9 +4,9 @@ import PackageDescription
 let package = Package(
     name: "AnyWay",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "LocationSimulator", targets: ["LocationSimulator"])],
+    products: [.executable(name: "AnyWay", targets: ["AnyWay"])],
     targets: [
-        .executableTarget(name: "LocationSimulator"),
-        .testTarget(name: "LocationSimulatorTests", dependencies: ["LocationSimulator"])
+        .executableTarget(name: "AnyWay"),
+        .testTarget(name: "AnyWayTests", dependencies: ["AnyWay"])
     ]
 )

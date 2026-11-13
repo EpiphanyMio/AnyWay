@@ -1,6 +1,6 @@
 # AnyWay · Windows
 
-这是独立的 Windows 桌面项目。功能以 Mac 版 `LocationSimulator` 1.1.0 为参考：iPhone、Android 和 HarmonyOS 7+ 实体设备的单点定位、路径循环模拟、地图选点和搜索、学校附近运动场地、400 米跑道模板、配速与动态速度、平滑路线偏移、JSON 配置导入导出、搜索历史和路线草稿记忆。配置 JSON 与 Mac 版 `schemaVersion: 1` 兼容。地图界面所需的 Leaflet 和 WebChannel 脚本随程序提供；底图瓦片仍需连接 OpenStreetMap，搜索使用 Nominatim，选中学校后使用 Overpass 查找运动场地，结果覆盖范围可能与 Apple 地图不同。
+这是 AnyWay 的 Windows 桌面实现：iPhone、Android 和 HarmonyOS 7+ 实体设备的单点定位、路径循环模拟、地图选点和搜索、学校附近运动场地、400 米跑道模板、配速与动态速度、平滑路线偏移、JSON 配置导入导出、搜索历史和路线草稿记忆。配置 JSON 与 Mac 版 `schemaVersion: 1` 兼容。地图界面所需的 Leaflet 和 WebChannel 脚本随程序提供；底图瓦片仍需连接 OpenStreetMap，搜索使用 Nominatim，选中学校后使用 Overpass 查找运动场地，结果覆盖范围可能与 Apple 地图不同。
 
 ## Windows 上运行
 
@@ -10,7 +10,7 @@
    ```powershell
    py -3.12 -m venv .venv
    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-   .\.venv\Scripts\python.exe -m winloc.app
+   .\.venv\Scripts\python.exe -m anyway.app
    ```
 
 3. 点击“刷新”选择设备。单点定位可直接输入坐标、在地图上选点或搜索地点；路线可在地图上逐点绘制，已绘制点可拖动调整，也可切换到“坐标文本”后应用。iPhone 和 Android 的路线约每 0.5 秒发送一次坐标；HarmonyOS 路线由设备端按 GPX 回放，间隔至少 1 秒。“停止”保留当前坐标，“清除定位”恢复设备默认定位。退出程序会尝试清除定位并结束设备会话。
@@ -26,7 +26,7 @@ Windows 无法运行 Apple 的 Xcode iOS Simulator，因此 Mac 版的 iOS 模�
 
 ## 打包
 
-在 Windows PowerShell 执行 `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`。输出目录为 `dist\WindowsLocationSimulator`；这是目录式程序，需连同目录中的依赖一起分发。桌面启动时会隐藏控制台窗口，同时保留设备桥接进程所需的标准输入输出。安装包默认安装到 `%LOCALAPPDATA%\Programs\AnyWay`。Android 功能还需要单独安装 ADB Platform-Tools 和下述手机配套 App。尚未在真实 Windows 主机和实体手机上完成端到端测试，分发前应在目标系统验证安装、发现设备、设置和清除定位、路线运行。程序未签名。
+在 Windows PowerShell 执行 `powershell -ExecutionPolicy Bypass -File scripts\build.ps1`。输出目录为 `dist\AnyWay`；根目录有无控制台的 `AnyWay.exe` 和供 iPhone 管道通信使用的 `AnyWayBridge.exe`，两者共用 `runtime` 子目录，需连同整个目录一起分发。辅助程序由主程序隐藏启动，不会留下终端窗口。安装包默认安装到 `%LOCALAPPDATA%\Programs\AnyWay`。Android 功能还需要单独安装 ADB Platform-Tools 和下述手机配套 App。尚未在真实 Windows 主机和实体手机上完成端到端测试，分发前应在目标系统验证安装、发现设备、设置和清除定位、路线运行。程序未签名。
 
 ## iOS 实体设备
 
@@ -36,7 +36,7 @@ Windows 无法运行 Apple 的 Xcode iOS Simulator，因此 Mac 版的 iOS 模�
 
 1. 在 Windows 安装 [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)，把 `adb.exe` 所在目录加入 PATH。手机开启开发者选项和 USB 调试，连接后确认 `adb devices -l` 显示状态 `device`。
 2. 使用 Android Studio 打开 `android-companion`，安装 Android SDK 35 和 JDK 17+，构建 `app` 的 debug APK。也可先运行 `python android-companion/prepare_wrapper.py` 还原并校验 Gradle wrapper，再在项目目录运行 `gradlew.bat :app:assembleDebug`。生成的 APK 位于 `app\build\outputs\apk\debug\app-debug.apk`。安装：`adb install -r app\build\outputs\apk\debug\app-debug.apk`。
-3. 在手机上**打开一次**“定位模拟器配套应用”，然后在开发者选项的“选择模拟位置信息应用”中选择它。返回 Windows 程序刷新设备，选中 Android 设备后即可使用单点定位、路线模拟、停止和清除。配套 App 支持 Android 8.0/API 26 及更新版本，不需要 root。
+3. 在手机上**打开一次**“AnyWay Android 配套应用”，然后在开发者选项的“选择模拟位置信息应用”中选择它。返回 Windows 程序刷新设备，选中 Android 设备后即可使用单点定位、路线模拟、停止和清除。配套 App 支持 Android 8.0/API 26 及更新版本，不需要 root。
 
 Windows 端通过 ADB 向配套 App 的受限广播接收器发送坐标。接收器只接受持有 Android `DUMP` 权限的发送者（ADB shell），并返回明确的成功或错误结果；App 使用 `LocationManager` 的 GPS 和网络测试位置提供者。USB 断开、App 未安装或未被选为模拟定位应用时，Windows 程序会显示失败。部分 App 会识别模拟位置或使用其他定位来源，厂商系统行为也可能不同。Android 模拟器的 `adb emu geo fix` 仅适用于模拟器，本项目的 Android 功能面向实体设备。
 
@@ -47,6 +47,8 @@ Windows 端通过 ADB 向配套 App 的受限广播接收器发送坐标。接�
 testhelper 每个 GPX 最多支持 1000 个位置点，更新间隔必须是 1～3600 秒的整数。程序会按路线时长自动选取间隔，并在设备端回放期间保留停止功能；因此 HarmonyOS 路线的时间和位置精度可能低于 iPhone/Android 约 0.5 秒一次的更新。设备端若返回“不支持位置模拟”，程序会显示具体错误。程序退出时会尝试关闭通过本程序启用的模拟定位。连接方式和 hdc 安装见 [华为官方 hdc 文档](https://developer.huawei.com/consumer/en/doc/harmonyos-guides/hdc/)。
 
 仍可安装 APK 的较早 HarmonyOS 版本可尝试上面的 Android/ADB 配套 App 路径；原生 HarmonyOS 设备不要安装该 APK。此项目尚未在实体 HarmonyOS 设备上完成端到端验证。
+
+此次配套 App 的包名改为 AnyWay 标识。若手机已安装旧版配套 App，请先在手机设置中卸载旧版，再安装新版，并在开发者选项中重新选择新版模拟位置应用。
 
 ## 验证
 

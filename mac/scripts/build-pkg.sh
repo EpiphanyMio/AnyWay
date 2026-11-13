@@ -13,7 +13,7 @@ fi
 
 bash scripts/build-app.sh
 
-app_dir="$PWD/.build/AnyWay.app"
+app_dir="${ANYWAY_APP_DIR:-$PWD/.build/AnyWay.app}"
 version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app_dir/Contents/Info.plist")"
 "$app_dir/Contents/Resources/iphone-venv/bin/python" -c \
     'import pymobiledevice3; from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation'
@@ -46,7 +46,7 @@ pkgbuild \
     --root "$staging_dir/root" \
     --component-plist "$staging_dir/components.plist" \
     --install-location /Applications \
-    --identifier local.LocationSimulator.pkg \
+    --identifier local.AnyWay.pkg \
     --version "$version" \
     "$output_dir/$pkg_name"
 

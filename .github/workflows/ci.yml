@@ -46,5 +46,6 @@ jobs:
       - name: Smoke test Windows executable
         shell: pwsh
         run: |
-          & ./windows/dist/WindowsLocationSimulator/WindowsLocationSimulator.exe --self-test
+          python windows/scripts/verify_bundle.py windows/dist/AnyWay
+          & ./windows/dist/AnyWay/AnyWayBridge.exe --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

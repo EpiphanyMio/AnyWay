@@ -13,17 +13,14 @@ $filteredPath = foreach ($entry in ($env:PATH -split ';')) {
   $entry
 }
 $env:PATH = $filteredPath -join ';'
-& .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --hide-console hide-early --name WindowsLocationSimulator `
-  --icon ..\assets\app-icon.ico `
-  --runtime-hook scripts\pyi_rth_qt_dll.py `
-  --collect-all pymobiledevice3 --collect-all pytun_pmd3 --collect-all PySide6.QtWebEngineCore `
-  --add-data "winloc\map.html;winloc" --add-data "winloc\qwebchannel.js;winloc" `
-  --add-data "winloc\combo_arrow.svg;winloc" --add-data "winloc\spin_up_arrow.svg;winloc" `
-  --add-data "winloc\down_arrow_disabled.svg;winloc" --add-data "winloc\spin_up_arrow_disabled.svg;winloc" `
-  --add-data "winloc\combo_arrow_dark.svg;winloc" --add-data "winloc\spin_up_arrow_dark.svg;winloc" `
-  --add-data "winloc\down_arrow_disabled_dark.svg;winloc" --add-data "winloc\spin_up_arrow_disabled_dark.svg;winloc" `
-  --add-data "..\assets\app-icon.png;assets" `
-  --add-data "..\VERSION;." `
-  --add-data "winloc\vendor;winloc\vendor" --add-data "winloc\iphone_bridge.py;winloc" `
-  --paths . launcher.py
-Write-Host "已生成 dist\WindowsLocationSimulator\WindowsLocationSimulator.exe"
+& .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean AnyWay.spec
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# Keep only the browser locales used by the desktop UI.
+Get-ChildItem "dist\AnyWay\runtime" -Directory -Recurse -Filter qtwebengine_locales |
+  ForEach-Object {
+    Get-ChildItem $_.FullName -File -Filter *.pak |
+      Where-Object { $_.BaseName -notin @('en-US', 'zh-CN') } | Remove-Item
+  }
+$bytes = (Get-ChildItem "dist\AnyWay" -Recurse -File | Measure-Object Length -Sum).Sum
+Write-Host ("AnyWay 目录大小: {0:N1} MiB" -f ($bytes / 1MB))
+Write-Host "已生成 dist\AnyWay\AnyWay.exe"

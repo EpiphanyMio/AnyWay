@@ -13,13 +13,20 @@ from .core import Coordinate
 BRIDGE = Path(__file__).with_name("iphone_bridge.py")
 
 
+def _helper_command(*args: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [str(Path(sys.executable).with_name("AnyWayBridge.exe")), *args]
+    return [sys.executable, *args]
+
+
 def connected_devices() -> list[str]:
     try:
-        command = ([sys.executable, "--list-devices"] if getattr(sys, "frozen", False)
+        command = (_helper_command("--list-devices") if getattr(sys, "frozen", False)
                    else [sys.executable, "-m", "pymobiledevice3", "usbmux", "list", "--simple", "--usb"])
         result = subprocess.run(
             command,
             capture_output=True, text=True, timeout=15, check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         devices = json.loads(result.stdout)
         if not isinstance(devices, list) or not all(isinstance(d, str) for d in devices):
@@ -65,7 +72,7 @@ class PhoneSession:
             return
         if self._process is not None:
             self._disconnect()
-        command = ([sys.executable, "--iphone-bridge", udid] if getattr(sys, "frozen", False)
+        command = (_helper_command("--iphone-bridge", udid) if getattr(sys, "frozen", False)
                    else [sys.executable, "-u", str(BRIDGE), udid])
         self._process = subprocess.Popen(
             command,

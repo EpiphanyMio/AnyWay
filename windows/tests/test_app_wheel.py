@@ -11,7 +11,7 @@ if importlib.util.find_spec("PySide6") is not None:
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLineEdit, QVBoxLayout, QWidget
 
-    from winloc.app import ClickToWheelDoubleSpinBox, ClickToWheelSpinBox
+    from anyway.app import ClickToWheelDoubleSpinBox, ClickToWheelSpinBox
 else:
     QApplication = None
 

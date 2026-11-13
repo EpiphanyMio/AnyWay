@@ -1,4 +1,4 @@
-package com.locationsimulator.mock;
+package com.anyway.mac.mock;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

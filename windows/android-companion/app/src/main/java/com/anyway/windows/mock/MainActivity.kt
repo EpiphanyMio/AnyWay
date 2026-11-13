@@ -1,4 +1,4 @@
-package com.windowslocationsimulator.mock
+package com.anyway.windows.mock
 
 import android.app.Activity
 import android.app.AppOpsManager
@@ -22,7 +22,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         layout.addView(TextView(this).apply {
-            text = "定位模拟器配套应用"
+            text = "AnyWay Android 配套应用"
             textSize = 23f
         })
         layout.addView(TextView(this).apply {

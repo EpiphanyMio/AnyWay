@@ -29,6 +29,13 @@ def main() -> None:
     mask = mask.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
     source.putalpha(mask)
     source.save(ASSETS / "app-icon.png")
+    # macOS displays the full ICNS canvas. Leave the system icon margin around
+    # the tile so its apparent size matches other app icons in Finder and Dock.
+    mac_icon = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    tile_size = 824
+    mac_icon.alpha_composite(source.resize((tile_size, tile_size), Image.Resampling.LANCZOS),
+                             ((SIZE - tile_size) // 2, (SIZE - tile_size) // 2))
+    mac_icon.save(ASSETS / "app-icon-macos.png")
     source.save(ASSETS / "app-icon.ico", format="ICO",
                 sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
                        (64, 64), (128, 128), (256, 256)])

@@ -1,4 +1,4 @@
-package com.locationsimulator.mock;
+package com.anyway.mac.mock;
 
 import android.app.Activity;
 import android.os.Bundle;
@@ -19,7 +19,7 @@ public final class MainActivity extends Activity {
         status.setTextSize(18);
         layout.addView(status);
         TextView instructions = new TextView(this);
-        instructions.setText("开启开发者选项和 USB 调试，在「选择模拟位置信息应用」中选择「定位模拟器」，然后连接 Mac 并在 Mac 应用中刷新设备。停止模拟后请在 Mac 应用中点击「清除定位」。");
+        instructions.setText("开启开发者选项和 USB 调试，在「选择模拟位置信息应用」中选择「AnyWay」，然后连接 Mac 并在 Mac 应用中刷新设备。停止模拟后请在 Mac 应用中点击「清除定位」。");
         instructions.setPadding(0, padding, 0, padding);
         layout.addView(instructions);
         Button refresh = new Button(this);

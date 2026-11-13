@@ -7,6 +7,10 @@
 - macOS 和 Windows 均支持跟随系统浅色/深色外观，也可在设置中手动选择。
 - Windows 深色模式适配主界面控件、数值按钮及地图提示区域。
 - 更新 AnyWay 应用图标，统一采用透明圆角，并用于 Windows 程序、安装器及 macOS 应用包。
+- 调整 macOS 图标在系统图标画布中的留白，使显示大小和圆角更贴近其他应用；Windows 图标轮廓保持原样。
+- 修复 Windows 快捷方式移动后显示 Python 图标，以及启动后常驻终端窗口的问题。
+- Windows 主程序与 iPhone 桥接程序共用精简后的运行依赖目录，并移除多余的浏览器语言资源。
+- 桌面程序、Android 配套应用和目录标识统一改为 AnyWay；升级时迁移旧设置和草稿。
 - macOS 路径点拖拽及 Windows 参数滚轮行为沿用 0.1.3 修复。
 
 本版本包含 macOS、Windows 和两端 Android 配套 APK，版本号均来自仓库根目录的 `VERSION` 文件。

@@ -8,7 +8,7 @@ import threading
 
 from .core import Coordinate
 
-PACKAGE = "com.windowslocationsimulator.mock"
+PACKAGE = "com.anyway.windows.mock"
 RECEIVER = PACKAGE + "/.LocationCommandReceiver"
 ACTION = PACKAGE + ".LOCATION_COMMAND"
 _RESULT = re.compile(r"Broadcast completed: result=(-?\d+)")
@@ -24,7 +24,8 @@ def _adb() -> str:
 def connected_devices() -> list[str]:
     try:
         result = subprocess.run([_adb(), "devices", "-l"], capture_output=True, text=True,
-                                timeout=15, check=True, encoding="utf-8", errors="replace")
+                                timeout=15, check=True, encoding="utf-8", errors="replace",
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("ADB 设备查询超时。") from exc
     except subprocess.CalledProcessError as exc:
@@ -50,7 +51,8 @@ class AndroidBridge:
                      "--es", "longitude", f"{point.longitude:.8f}"]
         try:
             result = subprocess.run(args, capture_output=True, text=True, timeout=20,
-                                    encoding="utf-8", errors="replace")
+                                    encoding="utf-8", errors="replace",
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("Android 定位命令超时；请检查 USB 连接。") from exc
         output = result.stdout + "\n" + result.stderr

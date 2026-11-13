@@ -1,6 +1,6 @@
 import unittest
 
-from winloc.core import (Configuration, Coordinate, DynamicPlan, MotionProfile,
+from anyway.core import (Configuration, Coordinate, DynamicPlan, MotionProfile,
                          RouteStepper, closed, generate_track, pace_to_speed,
                          parse_points, route_length)
 

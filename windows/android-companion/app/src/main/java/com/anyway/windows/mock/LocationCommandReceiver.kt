@@ -1,4 +1,4 @@
-package com.windowslocationsimulator.mock
+package com.anyway.windows.mock
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -56,7 +56,7 @@ class LocationCommandReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val ACTION = "com.windowslocationsimulator.mock.LOCATION_COMMAND"
+        private const val ACTION = "com.anyway.windows.mock.LOCATION_COMMAND"
         private val PROVIDERS = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
     }
 }

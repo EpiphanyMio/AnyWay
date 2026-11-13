@@ -4,7 +4,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from winloc.driver_check import DriverReport, install_apple_devices, probe
+from anyway.driver_check import DriverReport, install_apple_devices, probe
 
 
 class DriverCheckTests(unittest.TestCase):
@@ -37,19 +37,19 @@ class DriverCheckTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, "Original Name: usbaapl64.inf", "")
             return subprocess.CompletedProcess(args, 0, "USB\\VID_05AC&PID_12A8", "")
 
-        with (patch("winloc.driver_check.sys.platform", "win32"),
+        with (patch("anyway.driver_check.sys.platform", "win32"),
               patch.dict(sys.modules, {"winreg": types.SimpleNamespace()}),
-              patch("winloc.driver_check._registry_key_exists", side_effect=[True, False, False, False]),
-              patch("winloc.driver_check._run", side_effect=result)):
+              patch("anyway.driver_check._registry_key_exists", side_effect=[True, False, False, False]),
+              patch("anyway.driver_check._run", side_effect=result)):
             report = probe()
         self.assertTrue(report.apple_usb_connected)
         self.assertTrue(report.mobile_service_running)
         self.assertTrue(report.usb_driver_installed)
 
     def test_repair_installs_only_apple_devices_store_package(self):
-        with (patch("winloc.driver_check.sys.platform", "win32"),
-              patch("winloc.driver_check.shutil.which", return_value="winget.exe"),
-              patch("winloc.driver_check.subprocess.run",
+        with (patch("anyway.driver_check.sys.platform", "win32"),
+              patch("anyway.driver_check.shutil.which", return_value="winget.exe"),
+              patch("anyway.driver_check.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 0, "", "")) as run):
             self.assertIn("安装完成", install_apple_devices())
         command = run.call_args.args[0]

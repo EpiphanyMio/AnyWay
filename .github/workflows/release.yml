@@ -92,7 +92,8 @@ jobs:
       - name: Smoke test Windows executable
         shell: pwsh
         run: |
-          & ./windows/dist/WindowsLocationSimulator/WindowsLocationSimulator.exe --self-test
+          python windows/scripts/verify_bundle.py windows/dist/AnyWay
+          & ./windows/dist/AnyWay/AnyWayBridge.exe --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows installer
         shell: pwsh
@@ -108,9 +109,9 @@ jobs:
           $installer = "windows/dist/release/AnyWay-$version-Windows-Setup.exe"
           $result = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait -PassThru -WindowStyle Hidden
           if ($result.ExitCode -ne 0) { exit $result.ExitCode }
-          $installedApp = Join-Path $env:LOCALAPPDATA 'Programs\AnyWay\WindowsLocationSimulator.exe'
+          $installedApp = Join-Path $env:LOCALAPPDATA 'Programs\AnyWay\AnyWay.exe'
           if (-not (Test-Path $installedApp)) { throw "Installer did not place AnyWay in $installedApp" }
-          & $installedApp --self-test
+          & (Join-Path $env:LOCALAPPDATA 'Programs\AnyWay\AnyWayBridge.exe') --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Name Windows assets
         shell: pwsh

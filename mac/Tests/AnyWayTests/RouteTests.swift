@@ -1,7 +1,7 @@
 import AppKit
 import MapKit
 import XCTest
-@testable import LocationSimulator
+@testable import AnyWay
 
 final class RouteTests: XCTestCase {
     func testReleaseVersionOrdersNumericComponents() {
@@ -255,7 +255,7 @@ final class RouteTests: XCTestCase {
     }
 
     func testRouteDraftPersistsUnappliedTextAndCanBeCleared() throws {
-        let suite = "LocationSimulatorTests.\(UUID().uuidString)"
+        let suite = "AnyWayTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let point = try Coordinate(latitude: 39.9, longitude: 116.4)

@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from winloc.place_search import _is_campus, search_places
+from anyway.place_search import _is_campus, search_places
 
 
 class PlaceSearchTests(unittest.TestCase):
@@ -18,8 +18,8 @@ class PlaceSearchTests(unittest.TestCase):
             {"name": "北京大学大兴分校", "lat": "39.70", "lon": "116.25",
              "category": "amenity", "type": "university"},
         ]
-        with patch("winloc.place_search._overpass_campuses", return_value=[]), patch(
-                "winloc.place_search.urlopen",
+        with patch("anyway.place_search._overpass_campuses", return_value=[]), patch(
+                "anyway.place_search.urlopen",
                 return_value=io.BytesIO(json.dumps(records).encode())) as open_url:
             results = search_places("北京大学")
         self.assertEqual([place["name"] for place in results[:3]],
@@ -30,8 +30,8 @@ class PlaceSearchTests(unittest.TestCase):
     def test_known_campus_is_included_for_parent_school(self):
         records = [{"name": "北京邮电大学", "lat": "39.95", "lon": "116.35",
                     "category": "amenity", "type": "university"}]
-        with patch("winloc.place_search._overpass_campuses", return_value=[]), patch(
-                "winloc.place_search.urlopen",
+        with patch("anyway.place_search._overpass_campuses", return_value=[]), patch(
+                "anyway.place_search.urlopen",
                 return_value=io.BytesIO(json.dumps(records).encode())):
             results = search_places("北邮")
         self.assertEqual([place["name"] for place in results[:2]],
@@ -44,11 +44,11 @@ class PlaceSearchTests(unittest.TestCase):
     def test_campus_query_uses_secondary_osm_results(self):
         records = [{"name": "浙江大学（西溪校区）", "lat": "30.27", "lon": "120.14",
                     "category": "amenity", "type": "university"}]
-        from winloc.core import Coordinate
+        from anyway.core import Coordinate
         other_campuses = [{"name": "浙江大学（紫金港校区）", "subtitle": "OpenStreetMap",
                            "point": Coordinate(30.31, 120.09), "school": True}]
-        with patch("winloc.place_search._overpass_campuses", return_value=other_campuses), patch(
-                "winloc.place_search.urlopen",
+        with patch("anyway.place_search._overpass_campuses", return_value=other_campuses), patch(
+                "anyway.place_search.urlopen",
                 return_value=io.BytesIO(json.dumps(records).encode())):
             results = search_places("浙江大学")
         self.assertEqual([place["name"] for place in results],

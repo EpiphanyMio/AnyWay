@@ -3,19 +3,19 @@ import unittest
 from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
-from winloc.core import Configuration, Coordinate
-from winloc.harmony import (HarmonyBridge, _run, connected_devices, gpx,
+from anyway.core import Configuration, Coordinate
+from anyway.harmony import (HarmonyBridge, _run, connected_devices, gpx,
                             harmony_usb_connected, route_samples)
 
 
 class HarmonyTests(unittest.TestCase):
     def test_missing_hdc_prompt_requires_connected_huawei_usb_device(self):
-        with (patch("winloc.harmony.sys.platform", "win32"),
-              patch("winloc.harmony.subprocess.run", return_value=
+        with (patch("anyway.harmony.sys.platform", "win32"),
+              patch("anyway.harmony.subprocess.run", return_value=
                     subprocess.CompletedProcess([], 0, "USB\\VID_12D1&PID_1234", ""))):
             self.assertTrue(harmony_usb_connected())
-        with (patch("winloc.harmony.sys.platform", "win32"),
-              patch("winloc.harmony.subprocess.run", return_value=
+        with (patch("anyway.harmony.sys.platform", "win32"),
+              patch("anyway.harmony.subprocess.run", return_value=
                     subprocess.CompletedProcess([], 0, "USB\\VID_05AC&PID_1234", ""))):
             self.assertFalse(harmony_usb_connected())
 
@@ -27,7 +27,7 @@ class HarmonyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gpx([Coordinate(0, 0)] * 1001)
 
-    @patch("winloc.harmony.random.getrandbits", return_value=42)
+    @patch("anyway.harmony.random.getrandbits", return_value=42)
     def test_route_resamples_within_testhelper_limit(self, _seed):
         config = Configuration(route=[Coordinate(0, 0), Coordinate(0, .01)],
                                speedMetersPerSecond=5, passes=10)
@@ -36,14 +36,14 @@ class HarmonyTests(unittest.TestCase):
         self.assertGreaterEqual(interval, 1)
         self.assertEqual(samples[0], samples[-1])
 
-    @patch("winloc.harmony._hdc", return_value="hdc")
-    @patch("winloc.harmony._run", return_value="key1\nkey2\n[Empty]\nDevice ID Unauthorized\n")
+    @patch("anyway.harmony._hdc", return_value="hdc")
+    @patch("anyway.harmony._run", return_value="key1\nkey2\n[Empty]\nDevice ID Unauthorized\n")
     def test_device_discovery(self, run, _hdc):
         self.assertEqual(connected_devices(), ["key1", "key2"])
         run.assert_called_once_with(["hdc", "list", "targets"], timeout=15)
 
-    @patch("winloc.harmony._hdc", return_value="hdc")
-    @patch("winloc.harmony._run")
+    @patch("anyway.harmony._hdc", return_value="hdc")
+    @patch("anyway.harmony._run")
     def test_set_and_clear_commands(self, run, _hdc):
         def answer(args, timeout=25):
             if "enable-location-mock" in args:
@@ -63,7 +63,7 @@ class HarmonyTests(unittest.TestCase):
         bridge.clear("serial1")
         self.assertIn("disable-location-mock", run.call_args.args[0])
 
-    @patch("winloc.harmony.subprocess.run")
+    @patch("anyway.harmony.subprocess.run")
     def test_hdc_errors_are_not_silently_accepted(self, run):
         run.return_value = subprocess.CompletedProcess([], 0,
             "Error: Operation is not supported. Location mock is not supported on this device.", "")

@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "highlights": [
+    "Mac 和 Windows 支持 iPhone 无线定位。首次用 USB 完成配对后，可通过私人 Wi-Fi 或 iPhone 热点连接。",
+    "首次连接未开启开发者模式的 iPhone 时，应用会引导用户在手机上完成开启。"
+  ],
+  "fixes": [
+    "修复 Mac 无线连接后无法开始定位模拟的问题。",
+    "修复 Windows 拔掉 USB 后无法在设备列表中找到已配对 iPhone 的问题。"
+  ]
+}

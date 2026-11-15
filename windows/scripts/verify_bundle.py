@@ -1,6 +1,7 @@
 """Verify the Windows entry points have the intended PE subsystems."""
 
 from pathlib import Path
+import json
 import struct
 import sys
 
@@ -20,5 +21,8 @@ if __name__ == "__main__":
     assert subsystem(folder / "AnyWay.exe") == 2, "GUI must have no console"
     assert subsystem(folder / "AnyWayBridge.exe") == 3, "bridge needs standard I/O"
     assert (folder / "runtime").is_dir(), "shared runtime is missing"
+    notes = json.loads((folder / "runtime" / "RELEASE_NOTES.json").read_text(encoding="utf-8"))
+    version = (folder / "runtime" / "VERSION").read_text(encoding="utf-8").strip()
+    assert notes["version"] == version, "bundled release notes do not match VERSION"
     size = sum(path.stat().st_size for path in folder.rglob("*") if path.is_file())
     print(f"AnyWay bundle verified: {size / (1024 ** 2):.1f} MiB")

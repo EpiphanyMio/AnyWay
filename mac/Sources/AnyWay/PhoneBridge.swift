@@ -50,7 +50,7 @@ final class PhoneBridge: @unchecked Sendable {
         guard FileManager.default.isExecutableFile(atPath: pythonURL.path) else { return [] }
         let task = Process()
         task.executableURL = pythonURL
-        task.arguments = ["-m", "pymobiledevice3", "usbmux", "list", "--simple"]
+        task.arguments = [bridgeURL.path, "--list-devices"]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
@@ -58,11 +58,40 @@ final class PhoneBridge: @unchecked Sendable {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
         guard task.terminationStatus == 0 else {
-            throw SimctlError.failed("无法读取 iPhone。请检查连接和信任状态。")
+            throw SimctlError.failed("无法读取 iPhone。请检查 USB 或无线网络连接及信任状态。")
         }
-        let udids = try JSONDecoder().decode([String].self, from: data)
+        guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let udids = response["devices"] as? [String] else {
+            throw SimctlError.failed("iPhone 设备列表格式无效。")
+        }
+        let needsDeveloperMode = Set(response["developerModeRequired"] as? [String] ?? [])
+        let transports = response["transports"] as? [String: String] ?? [:]
         return udids.map {
-            LocationDevice(name: "iOS 设备 · \(String($0.suffix(8)))", udid: $0, kind: .iphone)
+            let hint = needsDeveloperMode.contains($0) ? " · 请开启开发者模式" : ""
+            let transport = transports[$0].map { " · \($0)" } ?? ""
+            return LocationDevice(name: "iOS 设备 · \(String($0.suffix(8)))\(transport)\(hint)",
+                                  udid: $0, kind: .iphone,
+                                  needsDeveloperMode: needsDeveloperMode.contains($0))
+        }
+    }
+
+    static func prepareWireless(udid: String) throws {
+        guard FileManager.default.isExecutableFile(atPath: pythonURL.path) else {
+            throw SimctlError.failed("缺少 iPhone Python 支持组件。")
+        }
+        let task = Process()
+        task.executableURL = pythonURL
+        task.arguments = [bridgeURL.path, "--prepare-wireless", udid]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        try task.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        let response = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard task.terminationStatus == 0, response?["ok"] as? Bool == true else {
+            let detail = response?["error"] as? String ?? "请先用 USB 连接、解锁并信任 iPhone。"
+            throw SimctlError.failed("无法开启 iPhone 无线连接：\(detail)")
         }
     }
 

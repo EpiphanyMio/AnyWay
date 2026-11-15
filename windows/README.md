@@ -4,7 +4,7 @@
 
 ## Windows 上运行
 
-1. 安装 Windows 10/11 和 Python 3.12（64 位）。若要连接 iPhone，可在连接后点击“检查 iOS 驱动”；缺失时使用“一键补全 iOS 驱动”安装 Apple 官方 Apple Devices，无需安装完整 iTunes。将 iPhone 用 USB 连接、解锁并点按“信任此电脑”；开启“开发者模式”并按提示重启。iPhone 需要 iOS 17 或更新版本。Android 和 HarmonyOS 的连接准备见下文。
+1. 安装 Windows 10/11 和 Python 3.12（64 位）。若要连接 iPhone，可在连接后点击“检查 iOS 驱动”；缺失时使用“一键补全 iOS 驱动”安装 Apple 官方 Apple Devices。首次将 iPhone 用 USB 连接、解锁并点按“信任此电脑”；点击“刷新”后，若开发者模式未开启，程序会尝试显示手机设置中的开关。请在 iPhone 的“设置 → 隐私与安全性 → 开发者模式”中开启，并按提示重启确认。iPhone 需要 iOS 17 或更新版本。Android 和 HarmonyOS 的连接准备见下文。
 2. 在 PowerShell 中运行：
 
    ```powershell
@@ -17,7 +17,9 @@
 
 Windows 无法运行 Apple 的 Xcode iOS Simulator，因此 Mac 版的 iOS 模拟器设备选项在 Windows 上没有对应设备；本程序的 iOS 定位目标是连接的实体 iPhone。
 
-若设备列表为空，先确认驱动已安装、USB 连接和信任状态。`pymobiledevice3 usbmux list --simple --usb` 是连接诊断的第一步。服务连接失败时，检查开发者模式以及 iOS 与 pymobiledevice3 的兼容性。某些设备准备步骤可能需要更新 Apple 驱动或完成配对。地图、地点搜索需要网络；OpenStreetMap 是境外地图服务，中国大陆暂不可用时会在地图上提示。手动坐标和设备通信可离线使用。
+无线连接：先用 USB 完成信任与开发者模式准备，在应用中选择 iPhone 并点击“开启 iPhone 无线连接”。成功后拔线，让电脑和手机处于同一可互通的局域网，再点击“刷新”。程序会通过 Bonjour 发现已配对设备并建立定位通道；访客网络、客户端隔离或 VPN 可能阻止发现。无线连接中断后，请恢复网络、刷新设备并重新开始定位。若设备列表为空，先确认驱动、USB 首次配对和信任状态；可用 `pymobiledevice3 usbmux list --simple --usb` 检查有线连接。服务连接失败时，检查开发者模式以及 iOS 与 pymobiledevice3 的兼容性。地图、地点搜索需要网络；手动坐标和设备通信在 USB 模式下可离线使用。
+
+开启无线连接成功后，应用会提示两种网络方案：连接同一个私人局域网，或让电脑连接 iPhone 个人热点；提示可勾选不再显示。首次连接开发者模式未开启的 iPhone 时，应用会尝试显示手机开关并弹窗说明操作步骤。每次更新后首次打开会显示该版本的重大更新和问题修复。
 
 ### iOS 驱动检测
 

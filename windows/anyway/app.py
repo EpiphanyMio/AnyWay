@@ -21,9 +21,10 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from .core import (Configuration, Coordinate, DynamicPlan, MotionProfile, RouteStepper,
                    closed, generate_track, pace_to_speed, parse_points, speed_to_pace)
-from .ios import PhoneSession, connected_devices
+from .ios import PhoneSession, connected_devices_with_status, prepare_wireless
 from .place_search import USER_AGENT, nearby_sports, search_places
-from .update_check import UpdateResult, check_update
+from .release_notes import load as load_release_notes
+from .update_check import UpdateResult, check_update, current_version
 from .android import AndroidBridge, connected_devices as connected_android_devices
 from .driver_check import (DriverReport, install_apple_devices,
                            probe as probe_ios_drivers)
@@ -226,11 +227,7 @@ class MainWindow(QMainWindow):
         self.draft_timer = QTimer(self)
         self.draft_timer.timeout.connect(self._save_draft)
         self.draft_timer.start(2000)
-        if not self.settings.get("research_notice_acknowledged", False):
-            QTimer.singleShot(0, self._show_research_notice)
-        if self.settings.get("auto_refresh", True):
-            QTimer.singleShot(200, self.refresh_devices)
-        QTimer.singleShot(300, self.check_for_updates)
+        QTimer.singleShot(0, self._show_startup_notices)
 
     @staticmethod
     def _read_json(path, fallback):
@@ -337,12 +334,14 @@ class MainWindow(QMainWindow):
 
         devices = self._box("目标设备", side)
         self.device_combo = QComboBox()
+        self.device_combo.currentIndexChanged.connect(lambda _index: self._update_action_state())
         devices.addWidget(self.device_combo)
         row = QHBoxLayout()
         self.refresh_button = self._button("刷新", self.refresh_devices, row)
         self._button("检查 iOS 驱动", self.check_ios_drivers, row)
         devices.addLayout(row)
-        device_hint = QLabel("支持 USB iPhone、ADB Android 和 hdc HarmonyOS 7+ 设备。")
+        self.wireless_button = self._button("开启 iPhone 无线连接", self.prepare_ios_wireless, devices)
+        device_hint = QLabel("iPhone 可通过 USB 或已配对的 Wi-Fi 连接；首次无线连接请先用 USB 准备。")
         device_hint.setWordWrap(True)
         devices.addWidget(device_hint)
         self.driver_guide = QLabel()
@@ -597,6 +596,21 @@ class MainWindow(QMainWindow):
         self.settings["research_notice_acknowledged"] = True
         self._write_json(SETTINGS, self.settings)
 
+    def _show_startup_notices(self):
+        version = current_version()
+        notes = load_release_notes(version)
+        if notes and self.settings.get("last_shown_release_version") != version:
+            content = ("重大更新\n" + "\n".join(f"• {item}" for item in notes.highlights)
+                       + "\n\n问题修复\n" + "\n".join(f"• {item}" for item in notes.fixes))
+            QMessageBox.information(self, f"AnyWay {version} 更新内容", content, QMessageBox.Ok)
+            self.settings["last_shown_release_version"] = version
+            self._write_json(SETTINGS, self.settings)
+        if not self.settings.get("research_notice_acknowledged", False):
+            self._show_research_notice()
+        if self.settings.get("auto_refresh", True):
+            self.refresh_devices()
+        QTimer.singleShot(300, self.check_for_updates)
+
     def _task(self, fn, done, busy_text):
         self.status.setText(busy_text)
         task = Task(fn)
@@ -790,9 +804,15 @@ class MainWindow(QMainWindow):
         def discover():
             found, errors = [], []
             harmony_attached = False
-            for kind, lookup in (("ios", connected_devices), ("android", connected_android_devices),
+            developer_mode_required = []
+            iphone_transports = {}
+            for kind, lookup in (("ios", connected_devices_with_status), ("android", connected_android_devices),
                                  ("harmony", connected_harmony_devices)):
                 try:
+                    if kind == "ios":
+                        iphones, developer_mode_required, iphone_transports = lookup()
+                        found.extend((kind, identifier) for identifier in iphones)
+                        continue
                     if kind == "harmony":
                         if not configure_hdc():
                             harmony_attached = harmony_usb_connected()
@@ -802,15 +822,17 @@ class MainWindow(QMainWindow):
                     found.extend((kind, identifier) for identifier in lookup())
                 except RuntimeError as exc:
                     errors.append(str(exc))
-            return found, errors, harmony_attached
+            return found, errors, harmony_attached, developer_mode_required, iphone_transports
         self._task(discover, self._set_devices, "正在查找 iPhone、Android 和 HarmonyOS 设备…")
 
     def _set_devices(self, result):
-        devices, errors, harmony_attached = result
+        devices, errors, harmony_attached, developer_mode_required, iphone_transports = result
         previous = self.device_combo.currentData()
         self.device_combo.clear()
         for kind, identifier in devices:
-            label = ("iOS 设备 · " + identifier[-8:] if kind == "ios"
+            label = ("iOS 设备 · " + identifier[-8:] +
+                     (" · " + iphone_transports[identifier] if identifier in iphone_transports else "") +
+                     (" · 请开启开发者模式" if identifier in developer_mode_required else "") if kind == "ios"
                      else "HarmonyOS 设备 · " + identifier if kind == "harmony"
                      else "Android 设备 · " + identifier)
             self.device_combo.addItem(label, (kind, identifier))
@@ -820,6 +842,22 @@ class MainWindow(QMainWindow):
         self._update_action_state()
         self.status.setText((f"找到 {len(devices)} 台设备。" if devices else "未找到设备。")
                             + (" " + "；".join(errors) if errors and not devices else ""))
+        if developer_mode_required:
+            self.status.setText("已尝试显示 iPhone 开发者模式开关。请在手机的设置 → 隐私与安全性 → 开发者模式中开启，并按提示重启确认。")
+            guided = set(self.settings.get("developer_mode_guide_shown_udids", []))
+            first = next((udid for udid in developer_mode_required if udid not in guided), None)
+            if first:
+                guided.add(first)
+                self.settings["developer_mode_guide_shown_udids"] = sorted(guided)
+                self._write_json(SETTINGS, self.settings)
+                QMessageBox.information(
+                    self, "在 iPhone 上开启开发者模式",
+                    "已尝试显示 iPhone 的开发者模式开关。请在手机上：\n\n"
+                    "1. 解锁手机，打开“设置 → 隐私与安全性 → 开发者模式”。\n"
+                    "2. 打开开关并选择“重新启动”。\n"
+                    "3. 重启后解锁，确认“打开开发者模式”，按提示输入锁屏密码。\n"
+                    "4. 回到 AnyWay，点击“刷新”重新连接。",
+                    QMessageBox.Ok)
         if harmony_attached:
             answer = QMessageBox.question(
                 self, "安装 HarmonyOS 设备工具",
@@ -832,6 +870,33 @@ class MainWindow(QMainWindow):
 
     def check_ios_drivers(self):
         self._task(probe_ios_drivers, self._show_driver_diagnosis, "正在检查 iOS 驱动…")
+
+    def prepare_ios_wireless(self):
+        device = self.device_combo.currentData()
+        if not device or device[0] != "ios":
+            QMessageBox.information(self, "开启 iPhone 无线连接", "请先用 USB 连接并选中 iPhone。")
+            return
+        self._device_task(lambda: prepare_wireless(device[1]), self._wireless_prepared,
+                          "正在为 iPhone 开启无线连接…")
+
+    def _wireless_prepared(self, _result):
+        self.status.setText("无线连接已准备好。拔掉数据线后，保持同一网络并点击刷新。")
+        if self.settings.get("hide_wireless_guide", False):
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("iPhone 无线连接已准备好")
+        dialog.setIcon(QMessageBox.Information)
+        dialog.setText("拔掉 USB 数据线后，选择以下任一种连接方式：\n\n"
+                       "方案 1：让电脑和 iPhone 连接同一个私人局域网。\n"
+                       "方案 2：在 iPhone 开启个人热点，让电脑连接该热点。\n\n"
+                       "连接后点击 AnyWay 的“刷新”。校园网可能隔离设备，导致无法发现 iPhone。")
+        skip = QCheckBox("勾选后不再显示此内容")
+        dialog.setCheckBox(skip)
+        dialog.setStandardButtons(QMessageBox.Ok)
+        dialog.exec()
+        if skip.isChecked():
+            self.settings["hide_wireless_guide"] = True
+            self._write_json(SETTINGS, self.settings)
 
     def _show_driver_diagnosis(self, report: DriverReport):
         self.driver_guide.setText(report.guide_html())
@@ -936,6 +1001,8 @@ class MainWindow(QMainWindow):
         self.start_button.setEnabled(idle and has_device)
         self.stop_button.setEnabled(not editing and not self.runner.stop_event.is_set())
         self.refresh_button.setEnabled(idle)
+        self.wireless_button.setEnabled(idle and self.device_combo.currentData() is not None
+                                        and self.device_combo.currentData()[0] == "ios")
         self.import_button.setEnabled(editing)
         self.save_button.setEnabled(editing)
         self.place_point_button.setEnabled(editing and has_place)

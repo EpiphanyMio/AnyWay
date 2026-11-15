@@ -19,6 +19,11 @@ jobs:
       - name: Test Mac application
         working-directory: mac
         run: swift test
+      - name: Install and test iPhone bridge
+        working-directory: mac
+        run: |
+          bash scripts/install-iphone-support.sh
+          .build/iphone-venv/bin/python -m unittest discover -s Tests -p test_iphone_wireless.py
       - name: Build Mac application
         working-directory: mac
         run: bash scripts/build-app.sh

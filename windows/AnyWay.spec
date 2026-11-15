@@ -8,9 +8,9 @@ assets = [
     ("anyway/map.html", "anyway"),
     ("anyway/qwebchannel.js", "anyway"),
     ("anyway/vendor", "anyway/vendor"),
-    ("anyway/iphone_bridge.py", "anyway"),
     ("../assets/app-icon.png", "assets"),
     ("../VERSION", "."),
+    ("../RELEASE_NOTES.json", "."),
 ]
 for name in ("combo_arrow", "spin_up_arrow", "down_arrow_disabled",
              "spin_up_arrow_disabled", "combo_arrow_dark", "spin_up_arrow_dark",
@@ -22,7 +22,8 @@ analysis = Analysis(
     pathex=["."],
     binaries=[],
     datas=assets + collect_data_files("pymobiledevice3") + collect_data_files("pytun_pmd3"),
-    hiddenimports=collect_submodules("pymobiledevice3") + collect_submodules("pytun_pmd3"),
+    hiddenimports=collect_submodules("pymobiledevice3") + collect_submodules("pytun_pmd3")
+                  + ["sslpsk_pmd3.sslpsk"],
     hookspath=[],
     runtime_hooks=["scripts/pyi_rth_qt_dll.py"],
     excludes=["IPython", "matplotlib", "pytest", "PySide6.QtWebEngineQuick",

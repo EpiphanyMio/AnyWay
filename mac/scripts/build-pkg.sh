@@ -11,10 +11,13 @@ if [ ! -x .build/iphone-venv/bin/python ]; then
     bash scripts/install-iphone-support.sh
 fi
 
+.build/iphone-venv/bin/python -m unittest discover -s Tests -p test_iphone_wireless.py
+
 bash scripts/build-app.sh
 
 app_dir="${ANYWAY_APP_DIR:-$PWD/.build/AnyWay.app}"
 version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app_dir/Contents/Info.plist")"
+test -f "$app_dir/Contents/Resources/RELEASE_NOTES.json"
 "$app_dir/Contents/Resources/iphone-venv/bin/python" -c \
     'import pymobiledevice3; from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation'
 codesign --verify --deep --strict "$app_dir"

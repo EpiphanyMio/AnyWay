@@ -10,7 +10,12 @@ struct ContentView: View {
     @AppStorage("autoRefreshDevices") private var autoRefreshDevices = true
     @AppStorage("appearanceMode") private var appearanceMode = "system"
     @AppStorage("hasAcknowledgedResearchNotice") private var hasAcknowledgedResearchNotice = false
+    @AppStorage("lastShownReleaseVersion") private var lastShownReleaseVersion = ""
+    @AppStorage("hideWirelessGuide") private var hideWirelessGuide = false
     @State private var showingResearchNotice = false
+    @State private var showingReleaseNotes = false
+    @State private var showingWirelessGuide = false
+    @State private var wirelessGuideDontShowAgain = false
     @State private var name = "我的路线"
     @State private var latitude = "39.9042"
     @State private var longitude = "116.4074"
@@ -78,9 +83,16 @@ struct ContentView: View {
         }
         .onAppear {
             Task { await updateChecker.check() }
-            if !hasAcknowledgedResearchNotice { showingResearchNotice = true }
             if !hasLoadedDraft { restoreDraftIfNeeded() }
-            if autoRefreshDevices { controller.refresh() }
+            if let notes = ReleaseNotes.load(currentVersion: updateChecker.currentVersion),
+               lastShownReleaseVersion != notes.version {
+                showingReleaseNotes = true
+            } else {
+                continueStartup()
+            }
+        }
+        .onChange(of: controller.wirelessPreparationCount) { _ in
+            if !hideWirelessGuide { showingWirelessGuide = true }
         }
         .onChange(of: updateChecker.requiresUpdate) { required in
             if required {
@@ -93,6 +105,15 @@ struct ContentView: View {
             if RouteDraftStore().save(draft) { hasSavedDraft = true }
         }
         .sheet(isPresented: $showingSettings) { settingsSheet }
+        .sheet(isPresented: $showingReleaseNotes, onDismiss: {
+            lastShownReleaseVersion = updateChecker.currentVersion
+            continueStartup()
+        }) { releaseNotesSheet }
+        .sheet(isPresented: $showingWirelessGuide, onDismiss: {
+            if wirelessGuideDontShowAgain { hideWirelessGuide = true }
+            wirelessGuideDontShowAgain = false
+        }) { wirelessGuideSheet }
+        .sheet(item: $controller.developerModeGuideDevice) { developerModeGuideSheet($0) }
         .alert("检查更新", isPresented: Binding(
             get: { updateMessage != nil },
             set: { if !$0 { updateMessage = nil } })) {
@@ -101,10 +122,83 @@ struct ContentView: View {
                 Text(updateMessage ?? "")
             }
         .alert("使用须知", isPresented: $showingResearchNotice) {
-            Button("我已知悉") { hasAcknowledgedResearchNotice = true }
+            Button("我已知悉") {
+                hasAcknowledgedResearchNotice = true
+                if autoRefreshDevices { controller.refresh() }
+            }
         } message: {
             Text("本软件仅用于研究学习 Apple Developer Toolkit 和 Android Debug Bridge，禁止用于作弊、造假等任何非法行为。下载学习后请于 24 小时内删除本软件。使用者因不当使用造成的不良影响由本人自行承担，与开发者无关。")
         }
+    }
+
+    private func continueStartup() {
+        if !hasAcknowledgedResearchNotice {
+            showingResearchNotice = true
+        } else if autoRefreshDevices {
+            controller.refresh()
+        }
+    }
+
+    private var releaseNotesSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("AnyWay \(updateChecker.currentVersion) 更新内容").font(.title2.bold())
+            if let notes = ReleaseNotes.load(currentVersion: updateChecker.currentVersion) {
+                Text("重大更新").font(.headline)
+                ForEach(notes.highlights, id: \.self) { Text("• \($0)") }
+                Text("问题修复").font(.headline)
+                ForEach(notes.fixes, id: \.self) { Text("• \($0)") }
+            }
+            HStack {
+                Spacer()
+                Button("开始使用") { showingReleaseNotes = false }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 540)
+    }
+
+    private func developerModeGuideSheet(_ device: LocationDevice) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("在 iPhone 上开启开发者模式").font(.title2.bold())
+            Text("已尝试为 \(device.name) 显示开发者模式开关。请在手机上完成以下操作：")
+            Text("1. 解锁 iPhone，打开“设置 → 隐私与安全性 → 开发者模式”。")
+            Text("2. 打开开关并选择“重新启动”。")
+            Text("3. 重启后解锁手机，确认“打开开发者模式”，按提示输入锁屏密码。")
+            Text("4. 回到 AnyWay，点击“刷新”重新连接设备。")
+            HStack {
+                Spacer()
+                Button("稍后再说") { controller.developerModeGuideDevice = nil }
+                Button("完成，刷新设备") {
+                    controller.developerModeGuideDevice = nil
+                    controller.refresh()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(26)
+        .frame(width: 530)
+    }
+
+    private var wirelessGuideSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("iPhone 无线连接已准备好").font(.title2.bold())
+            Text("拔掉 USB 数据线后，选择以下任一种连接方式：")
+            Text("方案 1：让 Mac 和 iPhone 连接同一个私人局域网。")
+            Text("方案 2：在 iPhone 开启个人热点，让 Mac 连接该热点。")
+            Text("连接后点击 AnyWay 的“刷新”。校园网可能隔离设备，导致无法发现 iPhone。")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("勾选后不再显示此内容", isOn: $wirelessGuideDontShowAgain)
+            HStack {
+                Spacer()
+                Button("知道了") { showingWirelessGuide = false }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 530)
     }
 
     private var header: some View {
@@ -429,6 +523,8 @@ struct ContentView: View {
                         .disabled(controller.isBusy)
                         .help("刷新模拟器、iPhone 与 Android 设备")
                     }
+                    Button("开启 iPhone 无线连接") { controller.prepareWirelessIPhones() }
+                        .disabled(controller.isBusy || !controller.selectedDevices.contains(where: { $0.kind == .iphone }))
                 }
 
                 card("单点定位", icon: "mappin.circle") {

@@ -18,6 +18,14 @@ struct LocationDevice: Identifiable, Sendable {
     let name: String
     let udid: String
     let kind: Kind
+    let needsDeveloperMode: Bool
+
+    init(name: String, udid: String, kind: Kind, needsDeveloperMode: Bool = false) {
+        self.name = name
+        self.udid = udid
+        self.kind = kind
+        self.needsDeveloperMode = needsDeveloperMode
+    }
     var id: String {
         let prefix: String
         switch kind {
@@ -122,6 +130,8 @@ final class SimulatorController: ObservableObject {
     @Published private(set) var isApplying = false
     @Published private(set) var previewRoute: [Coordinate] = []
     @Published private(set) var previewSeed: UInt64 = 42
+    @Published var developerModeGuideDevice: LocationDevice?
+    @Published private(set) var wirelessPreparationCount = 0
 
     private var runningTask: Task<Void, Never>?
     private let tickSeconds = 0.5
@@ -145,6 +155,30 @@ final class SimulatorController: ObservableObject {
         selectedDeviceIDs.formUnion(devices.filter { $0.kind == .iphone }.map(\.id))
     }
 
+    func prepareWirelessIPhones() {
+        let targets = selectedDevices.filter { $0.kind == .iphone }
+        guard !isBusy, !targets.isEmpty else { return }
+        isApplying = true
+        status = "正在为 iPhone 开启无线连接…"
+        Task {
+            defer { isApplying = false }
+            let failures = await Task.detached {
+                targets.compactMap { device -> String? in
+                    do {
+                        try PhoneBridge.prepareWireless(udid: device.udid)
+                        return nil
+                    } catch {
+                        return "\(device.name)：\(error.localizedDescription)"
+                    }
+                }
+            }.value
+            status = failures.isEmpty
+                ? "无线连接已准备好。拔掉数据线后，保持同一网络并点击刷新。"
+                : failures.joined(separator: "；")
+            if failures.isEmpty { wirelessPreparationCount += 1 }
+        }
+    }
+
     func refresh() {
         Task {
             do {
@@ -154,7 +188,18 @@ final class SimulatorController: ObservableObject {
                 if selectedDeviceIDs.isEmpty, let first = found.first {
                     selectedDeviceIDs.insert(first.id)
                 }
-                status = found.isEmpty ? "未找到设备。请启动 iOS 模拟器，或连接 iPhone / 已开启 USB 调试的 Android。" : "找到 \(found.count) 台可用设备。"
+                let defaults = UserDefaults.standard
+                var guided = Set(defaults.stringArray(forKey: "developerModeGuideShownUDIDs") ?? [])
+                if let device = found.first(where: { $0.needsDeveloperMode && !guided.contains($0.udid) }) {
+                    guided.insert(device.udid)
+                    defaults.set(Array(guided).sorted(), forKey: "developerModeGuideShownUDIDs")
+                    developerModeGuideDevice = device
+                }
+                if found.contains(where: { $0.needsDeveloperMode }) {
+                    status = "已尝试显示 iPhone 开发者模式开关。请在手机的设置 → 隐私与安全性 → 开发者模式中开启，并按提示重启确认。"
+                } else {
+                    status = found.isEmpty ? "未找到设备。请启动 iOS 模拟器，或连接 iPhone / 已开启 USB 调试的 Android。" : "找到 \(found.count) 台可用设备。"
+                }
             } catch {
                 status = error.localizedDescription
             }

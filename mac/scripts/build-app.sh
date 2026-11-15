@@ -13,6 +13,8 @@ mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
 cp "$bin_dir/AnyWay" "$app_dir/Contents/MacOS/AnyWay"
 cp scripts/iphone_location_bridge.py "$app_dir/Contents/Resources/iphone_location_bridge.py"
+cp scripts/iphone_wireless.py "$app_dir/Contents/Resources/iphone_wireless.py"
+cp ../RELEASE_NOTES.json "$app_dir/Contents/Resources/RELEASE_NOTES.json"
 python3 ../scripts/build_icns.py ../assets/app-icon-macos.png \
     "$app_dir/Contents/Resources/AnyWay.icns"
 if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then

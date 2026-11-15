@@ -6,3 +6,4 @@
 - Keep the JSON configuration schema compatible across platforms (`schemaVersion: 1`); update both readers/writers and both sets of tests when the schema changes.
 - Preserve platform-specific device bridges inside their platform directories. Shared documentation and version policy stay at the repository root.
 - For a release, build/test both platforms, then publish both platform artifacts under the same version tag. Do not describe a release as cross-platform until both artifacts exist.
+- In the first-launch update dialog and release notes, include only meaningful changes and fixes that users can experience. Do not copy the user's development prompts, implementation instructions, or internal process requirements into the major updates list. Review each item from a user's perspective before publishing.

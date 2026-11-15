@@ -4,6 +4,8 @@ AnyWay 是适用于 Mac 和 Windows 的桌面定位模拟器。两个平台共�
 
 Mac 端支持 iOS 模拟器、实体 iPhone 和 Android 实体设备。Windows 端支持实体 iPhone、Android 实体设备，以及 HarmonyOS 7+ 设备。
 
+两端的实体 iPhone 支持首次通过 USB 信任与配对、之后在同一局域网通过 Wi-Fi 进行定位模拟。首次连接时，程序会尝试显示 iPhone 的开发者模式开关，并提示用户在手机上完成开启。
+
 ## 项目结构
 
 - [`mac/`](mac/)：SwiftUI/MapKit 应用、Mac 端 Android 配套工程及 `.pkg` 构建脚本。

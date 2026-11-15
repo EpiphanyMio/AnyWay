@@ -11,10 +11,20 @@ if __name__ == "__main__":
         import anyway.harmony
         import anyway.ios
         import anyway.iphone_bridge
+        from anyway.iphone_wireless import check_wireless_crypto
+        check_wireless_crypto()
         print("AnyWay imports OK")
     elif len(sys.argv) > 1 and sys.argv[1] == "--list-devices":
-        from pymobiledevice3.usbmux import list_devices
-        print(json.dumps([device.serial for device in asyncio.run(list_devices()) if device.is_usb]), flush=True)
+        from anyway.iphone_wireless import device_inventory
+        print(json.dumps(asyncio.run(device_inventory())), flush=True)
+    elif len(sys.argv) > 2 and sys.argv[1] == "--prepare-wireless":
+        from anyway.iphone_wireless import prepare_wireless
+        try:
+            asyncio.run(prepare_wireless(sys.argv[2]))
+            print(json.dumps({"ok": True}), flush=True)
+        except Exception as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False), flush=True)
+            sys.exit(1)
     elif len(sys.argv) > 2 and sys.argv[1] == "--iphone-bridge":
         try:
             from anyway.iphone_bridge import run

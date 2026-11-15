@@ -3,9 +3,9 @@ import asyncio
 import json
 import sys
 
-from pymobiledevice3.remote.userspace_tunnel import UserspaceRsdTunnel
 from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
+from .iphone_wireless import device_inventory, location_tunnel, prepare_wireless
 
 
 def reply(**values):
@@ -13,7 +13,7 @@ def reply(**values):
 
 
 async def run(udid):
-    async with UserspaceRsdTunnel(serial=udid) as device:
+    async with location_tunnel(udid) as device:
         async with DvtProvider(device) as dvt, LocationSimulation(dvt) as location:
             reply(ready=True)
             while True:
@@ -37,7 +37,13 @@ async def run(udid):
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run(sys.argv[1]))
+        if sys.argv[1] == "--list-devices":
+            reply(**asyncio.run(device_inventory()))
+        elif sys.argv[1] == "--prepare-wireless":
+            asyncio.run(prepare_wireless(sys.argv[2]))
+            reply(ok=True)
+        else:
+            asyncio.run(run(sys.argv[1]))
     except Exception as error:
         reply(ready=False, error=str(error))
         sys.exit(1)

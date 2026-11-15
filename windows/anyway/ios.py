@@ -1,4 +1,4 @@
-"""iOS 17+ developer location bridge through pymobiledevice3 USB RSD."""
+"""iOS 17+ developer location bridge over USB or paired Wi-Fi."""
 from __future__ import annotations
 
 import json
@@ -10,8 +10,6 @@ from pathlib import Path
 
 from .core import Coordinate
 
-BRIDGE = Path(__file__).with_name("iphone_bridge.py")
-
 
 def _helper_command(*args: str) -> list[str]:
     if getattr(sys, "frozen", False):
@@ -19,26 +17,50 @@ def _helper_command(*args: str) -> list[str]:
     return [sys.executable, *args]
 
 
-def connected_devices() -> list[str]:
+def connected_devices_with_status() -> tuple[list[str], list[str], dict[str, str]]:
     try:
         command = (_helper_command("--list-devices") if getattr(sys, "frozen", False)
-                   else [sys.executable, "-m", "pymobiledevice3", "usbmux", "list", "--simple", "--usb"])
+                   else [sys.executable, "-m", "anyway.iphone_bridge", "--list-devices"])
         result = subprocess.run(
             command,
             capture_output=True, text=True, timeout=15, check=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        devices = json.loads(result.stdout)
+        inventory = json.loads(result.stdout)
+        devices = inventory["devices"]
         if not isinstance(devices, list) or not all(isinstance(d, str) for d in devices):
             raise ValueError("设备列表格式无效。")
-        return devices
+        required = inventory.get("developerModeRequired", [])
+        transports = inventory.get("transports", {})
+        return (devices, required if isinstance(required, list) else [],
+                transports if isinstance(transports, dict) else {})
     except FileNotFoundError as exc:
         raise RuntimeError("未找到 Python。请重新安装程序。") from exc
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or "").strip()
         raise RuntimeError(f"无法读取 iPhone：{detail or '请安装 Apple Mobile Device Support、解锁并信任电脑。'}") from exc
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("读取 iPhone 超时，请检查 USB 连接。") from exc
+        raise RuntimeError("读取 iPhone 超时，请检查 USB 或无线网络连接。") from exc
+
+
+def connected_devices() -> list[str]:
+    return connected_devices_with_status()[0]
+
+
+def prepare_wireless(udid: str) -> None:
+    command = (_helper_command("--prepare-wireless", udid) if getattr(sys, "frozen", False)
+               else [sys.executable, "-m", "anyway.iphone_bridge", "--prepare-wireless", udid])
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=45,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("开启无线连接超时。请检查 iPhone 是否已解锁并信任电脑。") from exc
+    if result.returncode:
+        try:
+            detail = json.loads(result.stdout).get("error", "")
+        except (ValueError, TypeError):
+            detail = (result.stderr or "").strip()
+        raise RuntimeError("无法开启 iPhone 无线连接：" + (detail or "请先通过 USB 连接并信任电脑。"))
 
 
 class PhoneSession:
@@ -60,7 +82,7 @@ class PhoneSession:
             raise RuntimeError("iPhone 定位服务响应超时。") from exc
         if not line:
             self._disconnect()
-            raise RuntimeError("iPhone 定位服务意外退出。请检查开发者模式和 USB 连接。")
+            raise RuntimeError("iPhone 定位服务意外退出。请检查开发者模式及 USB 或无线网络连接。")
         try:
             return json.loads(line)
         except json.JSONDecodeError as exc:
@@ -73,7 +95,7 @@ class PhoneSession:
         if self._process is not None:
             self._disconnect()
         command = (_helper_command("--iphone-bridge", udid) if getattr(sys, "frozen", False)
-                   else [sys.executable, "-u", str(BRIDGE), udid])
+                   else [sys.executable, "-u", "-m", "anyway.iphone_bridge", udid])
         self._process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

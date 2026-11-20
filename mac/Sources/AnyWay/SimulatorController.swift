@@ -18,9 +18,13 @@ struct LocationDevice: Identifiable, Sendable {
     let name: String
     let udid: String
     let kind: Kind
+    let isUSB: Bool
+    let address: String?
     let needsDeveloperMode: Bool
 
-    init(name: String, udid: String, kind: Kind, needsDeveloperMode: Bool = false) {
+    init(name: String, udid: String, kind: Kind, needsDeveloperMode: Bool = false, address: String? = nil, isUSB: Bool = false) {
+        self.isUSB = isUSB
+        self.address = address
         self.name = name
         self.udid = udid
         self.kind = kind
@@ -89,14 +93,23 @@ enum Simctl {
 }
 
 enum DeviceBackend {
-    static func availableDevices() throws -> [LocationDevice] {
+    static func availableDevices(lastIP: RecentIPConnection?) throws -> [LocationDevice] {
         let simulators = ((try? Simctl.bootedDevices()) ?? []).map {
             LocationDevice(name: "\($0.name) · 模拟器", udid: $0.udid, kind: .simulator)
         }
         let iphones = Result { try PhoneBridge.connectedDevices() }
         let androids = Result { try AndroidBridge.connectedDevices() }
-        let found = simulators + ((try? iphones.get()) ?? [])
+        var found = simulators + ((try? iphones.get()) ?? [])
             + ((try? androids.get()) ?? [])
+        if let saved = lastIP, !found.contains(where: { $0.udid == saved.udid && $0.isUSB }) {
+            do {
+                let direct = try PhoneBridge.checkIP(saved.address, expectedUDID: saved.udid)
+                found.removeAll { $0.id == direct.id }
+                found.append(direct)
+            } catch {
+                if found.isEmpty { throw error }
+            }
+        }
         if found.isEmpty {
             if case .failure(let error) = iphones { throw error }
             if case .failure(let error) = androids { throw error }
@@ -107,7 +120,7 @@ enum DeviceBackend {
     static func set(_ coordinate: Coordinate, device: LocationDevice) throws {
         switch device.kind {
         case .simulator: try Simctl.set(coordinate, device: device.udid)
-        case .iphone: try PhoneBridge.shared.set(coordinate, udid: device.udid)
+        case .iphone: try PhoneBridge.shared.set(coordinate, udid: device.udid, address: device.address)
         case .android: try AndroidBridge.set(coordinate, serial: device.udid)
         }
     }
@@ -115,7 +128,7 @@ enum DeviceBackend {
     static func clear(device: LocationDevice) throws {
         switch device.kind {
         case .simulator: try Simctl.clear(device: device.udid)
-        case .iphone: try PhoneBridge.shared.clear(udid: device.udid)
+        case .iphone: try PhoneBridge.shared.clear(udid: device.udid, address: device.address)
         case .android: try AndroidBridge.clear(serial: device.udid)
         }
     }
@@ -130,8 +143,19 @@ final class SimulatorController: ObservableObject {
     @Published private(set) var isApplying = false
     @Published private(set) var previewRoute: [Coordinate] = []
     @Published private(set) var previewSeed: UInt64 = 42
+    @Published var ipConnectionError: String?
     @Published var developerModeGuideDevice: LocationDevice?
     @Published private(set) var wirelessPreparationCount = 0
+
+    @Published private(set) var recentIPs: [RecentIPConnection]
+    @Published private(set) var deviceNames: [String: String]
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        recentIPs = RecentIPConnection.load(from: defaults)
+        deviceNames = defaults.dictionary(forKey: "deviceAliases") as? [String: String] ?? [:]
+    }
 
     private var runningTask: Task<Void, Never>?
     private let tickSeconds = 0.5
@@ -179,16 +203,53 @@ final class SimulatorController: ObservableObject {
         }
     }
 
-    func refresh() {
+    func renameConnection(_ entry: RecentIPConnection, to name: String) {
+        guard let index = recentIPs.firstIndex(where: { $0.id == entry.id }) else { return }
+        recentIPs[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        RecentIPConnection.save(recentIPs, to: defaults)
+    }
+
+    func renameDevice(_ device: LocationDevice, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        deviceNames[device.id] = trimmed.isEmpty ? nil : trimmed
+        defaults.set(deviceNames, forKey: "deviceAliases")
+    }
+
+    func connectIP(_ input: String, expectedUDID: String? = nil) {
+        guard !isBusy else { return }
+        let address = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        isApplying = true
+        status = "正在验证 iPhone 配对和定位服务…"
         Task {
+            defer { isApplying = false }
             do {
-                let found = try await Task.detached { try DeviceBackend.availableDevices() }.value
+                let device = try await Task.detached { try PhoneBridge.checkIP(address, expectedUDID: expectedUDID) }.value
+                recentIPs = RecentIPConnection.recording(address: address, udid: device.udid, in: recentIPs)
+                RecentIPConnection.save(recentIPs, to: defaults)
+                devices.removeAll { $0.id == device.id }
+                devices.append(device)
+                selectedDeviceIDs.insert(device.id)
+                status = "已连接 \(address)，定位服务可用。"
+            } catch {
+                status = error.localizedDescription
+                ipConnectionError = status
+            }
+        }
+    }
+
+    func refresh() {
+        guard !isBusy else { return }
+        isApplying = true
+        Task {
+            defer { isApplying = false }
+            do {
+                let lastIP = recentIPs.first
+                let found = try await Task.detached { try DeviceBackend.availableDevices(lastIP: lastIP) }.value
                 devices = found
                 selectedDeviceIDs.formIntersection(Set(found.map(\.id)))
                 if selectedDeviceIDs.isEmpty, let first = found.first {
                     selectedDeviceIDs.insert(first.id)
                 }
-                let defaults = UserDefaults.standard
                 var guided = Set(defaults.stringArray(forKey: "developerModeGuideShownUDIDs") ?? [])
                 if let device = found.first(where: { $0.needsDeveloperMode && !guided.contains($0.udid) }) {
                     guided.insert(device.udid)

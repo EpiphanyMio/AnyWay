@@ -47,6 +47,26 @@ def connected_devices() -> list[str]:
     return connected_devices_with_status()[0]
 
 
+def check_ip(address: str, expected_udid: str | None = None) -> str:
+    args = ["--check-ip", address]
+    if expected_udid:
+        args.append(expected_udid)
+    command = (_helper_command(*args) if getattr(sys, "frozen", False)
+               else [sys.executable, "-m", "anyway.iphone_bridge", *args])
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=30,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("连接 iPhone 超时。请解锁手机并核对 IP 地址。") from exc
+    try:
+        response = json.loads(result.stdout)
+    except ValueError as exc:
+        raise RuntimeError("iPhone 桥接程序未返回有效响应，请检查安装。") from exc
+    if result.returncode or not response.get("udid"):
+        raise RuntimeError(response.get("error") or "无法验证 iPhone 的定位服务。")
+    return response["udid"]
+
+
 def prepare_wireless(udid: str) -> None:
     command = (_helper_command("--prepare-wireless", udid) if getattr(sys, "frozen", False)
                else [sys.executable, "-m", "anyway.iphone_bridge", "--prepare-wireless", udid])
@@ -65,6 +85,7 @@ def prepare_wireless(udid: str) -> None:
 
 class PhoneSession:
     def __init__(self):
+        self.direct_addresses: dict[str, str] = {}
         self._lock = threading.RLock()
         self._process: subprocess.Popen | None = None
         self._udid: str | None = None
@@ -96,6 +117,9 @@ class PhoneSession:
             self._disconnect()
         command = (_helper_command("--iphone-bridge", udid) if getattr(sys, "frozen", False)
                    else [sys.executable, "-u", "-m", "anyway.iphone_bridge", udid])
+        address = self.direct_addresses.get(udid)
+        if address:
+            command.append(address)
         self._process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

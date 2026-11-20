@@ -25,10 +25,17 @@ if __name__ == "__main__":
         except Exception as exc:
             print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False), flush=True)
             sys.exit(1)
+    elif len(sys.argv) > 2 and sys.argv[1] == "--check-ip":
+        from anyway.iphone_bridge import check_ip
+        try:
+            print(json.dumps({"udid": asyncio.run(check_ip(*sys.argv[2:]))}), flush=True)
+        except Exception as exc:
+            print(json.dumps({"error": str(exc)}), flush=True)
+            sys.exit(1)
     elif len(sys.argv) > 2 and sys.argv[1] == "--iphone-bridge":
         try:
             from anyway.iphone_bridge import run
-            asyncio.run(run(sys.argv[2]))
+            asyncio.run(run(*sys.argv[2:]))
         except Exception as exc:
             print(json.dumps({"ready": False, "error": str(exc)}, ensure_ascii=False), flush=True)
             sys.exit(1)

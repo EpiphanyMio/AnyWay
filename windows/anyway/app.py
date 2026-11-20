@@ -12,7 +12,7 @@ import time
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox, QSplitter,
     QTabWidget, QTextEdit, QVBoxLayout, QWidget)
 from PySide6.QtWebChannel import QWebChannel
@@ -21,7 +21,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from .core import (Configuration, Coordinate, DynamicPlan, MotionProfile, RouteStepper,
                    closed, generate_track, pace_to_speed, parse_points, speed_to_pace)
-from .ios import PhoneSession, connected_devices_with_status, prepare_wireless
+from .ios import PhoneSession, check_ip, connected_devices_with_status, prepare_wireless
 from .place_search import USER_AGENT, nearby_sports, search_places
 from .release_notes import load as load_release_notes
 from .update_check import UpdateResult, check_update, current_version
@@ -31,7 +31,7 @@ from .driver_check import (DriverReport, install_apple_devices,
 from .harmony import (HarmonyBridge, configure_hdc,
                       connected_devices as connected_harmony_devices,
                       harmony_usb_connected)
-from .user_data import APP_DIR, DRAFT, SETTINGS, migrate_legacy_data
+from .user_data import APP_DIR, DRAFT, SETTINGS, migrate_legacy_data, recent_ip_connections, remember_ip
 
 RESEARCH_NOTICE = ("本软件仅用于研究学习 Apple Developer Toolkit 和 Android Debug Bridge，禁止用于作弊、造假等任何非法行为。"
                    "下载学习后请于 24 小时内删除本软件。使用者因不当使用造成的不良影响由本人自行承担，与开发者无关。")
@@ -219,6 +219,8 @@ class MainWindow(QMainWindow):
         self.map_ready = False
         self.groups = []
         self.settings = self._read_json(SETTINGS, {"restore": True, "auto_refresh": True, "history": []})
+        self.recent_ips = recent_ip_connections(self.settings)
+        self.device_aliases = self.settings.setdefault("device_aliases", {})
         self._build_ui()
         self._apply_style()
         QApplication.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
@@ -332,26 +334,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(scroll)
         splitter.setSizes([830, 400])
 
-        devices = self._box("目标设备", side)
-        self.device_combo = QComboBox()
-        self.device_combo.currentIndexChanged.connect(lambda _index: self._update_action_state())
-        devices.addWidget(self.device_combo)
-        row = QHBoxLayout()
-        self.refresh_button = self._button("刷新", self.refresh_devices, row)
-        self._button("检查 iOS 驱动", self.check_ios_drivers, row)
-        devices.addLayout(row)
-        self.wireless_button = self._button("开启 iPhone 无线连接", self.prepare_ios_wireless, devices)
-        device_hint = QLabel("iPhone 可通过 USB 或已配对的 Wi-Fi 连接；首次无线连接请先用 USB 准备。")
-        device_hint.setWordWrap(True)
-        devices.addWidget(device_hint)
-        self.driver_guide = QLabel()
-        self.driver_guide.setTextFormat(Qt.RichText)
-        self.driver_guide.setOpenExternalLinks(True)
-        self.driver_guide.setWordWrap(True)
-        self.driver_guide.hide()
-        devices.addWidget(self.driver_guide)
-        self.repair_button = self._button("一键补全 iOS 驱动", self.repair_ios_drivers, devices)
-        self.repair_button.hide()
+        self._build_device_panel(side)
 
         single = self._box("单点定位", side)
         self.pick_point = QCheckBox("在地图上选点")
@@ -471,6 +454,47 @@ class MainWindow(QMainWindow):
         notice.setObjectName("noticeLabel")
         notice.setWordWrap(True)
         outer.addWidget(notice)
+
+    def _build_device_panel(self, side):
+        devices = self._box("目标设备", side)
+        self.device_combo = QComboBox()
+        self.device_combo.currentIndexChanged.connect(lambda _index: self._update_action_state())
+        target_row = QHBoxLayout()
+        target_row.addWidget(self.device_combo, 1)
+        self.rename_device_button = self._button("设备命名", self.rename_device, target_row)
+        devices.addLayout(target_row)
+        row = QHBoxLayout()
+        self.refresh_button = self._button("刷新", self.refresh_devices, row)
+        self._button("检查 iOS 驱动", self.check_ios_drivers, row)
+        devices.addLayout(row)
+        self.wireless_button = self._button("开启 iPhone 无线连接", self.prepare_ios_wireless, devices)
+        ip_row = QHBoxLayout()
+        self.iphone_ip = QLineEdit(self.recent_ips[0]["address"] if self.recent_ips else "")
+        self.iphone_ip.setPlaceholderText("iPhone 的 Wi-Fi IPv4 地址")
+        ip_row.addWidget(self.iphone_ip)
+        self.ip_button = self._button("通过 IP 连接", self.connect_ios_ip, ip_row)
+        devices.addLayout(ip_row)
+        self.recent_label = QLabel("最近使用")
+        devices.addWidget(self.recent_label)
+        self.recent_combo = QComboBox()
+        self.recent_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        devices.addWidget(self.recent_combo)
+        recent_row = QHBoxLayout()
+        self.reconnect_button = self._button("重新连接", self.reconnect_recent_ip, recent_row)
+        self.rename_ip_button = self._button("网络命名", self.rename_recent_ip, recent_row)
+        devices.addLayout(recent_row)
+        self._show_recent_ips()
+        device_hint = QLabel("iPhone 可通过 USB 或已配对的 Wi-Fi 连接；首次无线连接请先用 USB 准备。")
+        device_hint.setWordWrap(True)
+        devices.addWidget(device_hint)
+        self.driver_guide = QLabel()
+        self.driver_guide.setTextFormat(Qt.RichText)
+        self.driver_guide.setOpenExternalLinks(True)
+        self.driver_guide.setWordWrap(True)
+        self.driver_guide.hide()
+        devices.addWidget(self.driver_guide)
+        self.repair_button = self._button("一键补全 iOS 驱动", self.repair_ios_drivers, devices)
+        self.repair_button.hide()
 
     def _apply_style(self):
         mode = self.settings.get("appearance", "system")
@@ -801,6 +825,8 @@ class MainWindow(QMainWindow):
     def refresh_devices(self):
         if self.runner or self._device_busy:
             return
+        saved = self.recent_ips[0] if self.recent_ips else {}
+
         def discover():
             found, errors = [], []
             harmony_attached = False
@@ -822,11 +848,23 @@ class MainWindow(QMainWindow):
                     found.extend((kind, identifier) for identifier in lookup())
                 except RuntimeError as exc:
                     errors.append(str(exc))
-            return found, errors, harmony_attached, developer_mode_required, iphone_transports
-        self._task(discover, self._set_devices, "正在查找 iPhone、Android 和 HarmonyOS 设备…")
+            direct_addresses = {}
+            address, udid = saved.get("address"), saved.get("udid")
+            if address and udid and iphone_transports.get(udid) != "USB":
+                try:
+                    check_ip(address, udid)
+                    direct_addresses[udid] = address
+                    iphone_transports[udid] = address
+                    if ("ios", udid) not in found:
+                        found.append(("ios", udid))
+                except RuntimeError as exc:
+                    errors.append(str(exc))
+            return found, errors, harmony_attached, developer_mode_required, iphone_transports, direct_addresses
+        self._device_task(discover, self._set_devices, "正在查找 iPhone、Android 和 HarmonyOS 设备…")
 
     def _set_devices(self, result):
-        devices, errors, harmony_attached, developer_mode_required, iphone_transports = result
+        devices, errors, harmony_attached, developer_mode_required, iphone_transports, direct_addresses = result
+        self.ios_session.direct_addresses = direct_addresses
         previous = self.device_combo.currentData()
         self.device_combo.clear()
         for kind, identifier in devices:
@@ -835,10 +873,10 @@ class MainWindow(QMainWindow):
                      (" · 请开启开发者模式" if identifier in developer_mode_required else "") if kind == "ios"
                      else "HarmonyOS 设备 · " + identifier if kind == "harmony"
                      else "Android 设备 · " + identifier)
-            self.device_combo.addItem(label, (kind, identifier))
-        index = self.device_combo.findData(previous)
-        if index >= 0:
-            self.device_combo.setCurrentIndex(index)
+            target = (kind, identifier)
+            index = self._show_device(target, label)
+            if target == previous:
+                self.device_combo.setCurrentIndex(index)
         self._update_action_state()
         self.status.setText((f"找到 {len(devices)} 台设备。" if devices else "未找到设备。")
                             + (" " + "；".join(errors) if errors and not devices else ""))
@@ -871,6 +909,92 @@ class MainWindow(QMainWindow):
     def check_ios_drivers(self):
         self._task(probe_ios_drivers, self._show_driver_diagnosis, "正在检查 iOS 驱动…")
 
+    def _show_device(self, target, default_label):
+        index = next((i for i in range(self.device_combo.count())
+                      if self.device_combo.itemData(i) == target), -1)
+        if index < 0:
+            index = self.device_combo.count()
+            self.device_combo.addItem(default_label, target)
+        alias = self.device_aliases.get(":".join(target))
+        self.device_combo.setItemText(index, f"{alias} · {default_label}" if alias else default_label)
+        self.device_combo.setItemData(index, default_label, Qt.ItemDataRole.ToolTipRole)
+        return index
+
+    def rename_device(self):
+        index = self.device_combo.currentIndex()
+        target = self.device_combo.itemData(index)
+        if not target:
+            return
+        key = ":".join(target)
+        name, ok = QInputDialog.getText(self, "设备名称", "设备名称（留空恢复默认显示）",
+                                        text=self.device_aliases.get(key, ""))
+        if ok:
+            if name.strip():
+                self.device_aliases[key] = name.strip()
+            else:
+                self.device_aliases.pop(key, None)
+            self._write_json(SETTINGS, self.settings)
+            self._show_device(target, self.device_combo.itemData(index, Qt.ItemDataRole.ToolTipRole))
+            self._show_recent_ips(self.recent_combo.currentIndex())
+
+    def _show_recent_ips(self, index=0):
+        self.recent_combo.clear()
+        for row in self.recent_ips:
+            phone = self.device_aliases.get("ios:" + row["udid"], "iPhone · " + row["udid"][-8:])
+            self.recent_combo.addItem(" · ".join(filter(None, [row["name"], row["address"], phone])))
+        self.recent_combo.setCurrentIndex(index)
+        for widget in (self.recent_label, self.recent_combo, self.reconnect_button, self.rename_ip_button):
+            widget.setVisible(bool(self.recent_ips))
+
+    def rename_recent_ip(self):
+        index = self.recent_combo.currentIndex()
+        if index < 0:
+            return
+        entry = self.recent_ips[index]
+        name, ok = QInputDialog.getText(self, "网络名称", "网络名称（留空恢复默认显示）", text=entry["name"])
+        if ok:
+            entry["name"] = name.strip()
+            self.settings["recent_ip_connections"] = self.recent_ips
+            self._write_json(SETTINGS, self.settings)
+            self._show_recent_ips(index)
+
+    def reconnect_recent_ip(self):
+        index = self.recent_combo.currentIndex()
+        if index >= 0:
+            entry = self.recent_ips[index]
+            self.iphone_ip.setText(entry["address"])
+            self._connect_ios_address(entry["address"], entry["udid"])
+
+    def connect_ios_ip(self):
+        self._connect_ios_address(self.iphone_ip.text().strip(), None)
+
+    def _connect_ios_address(self, address, expected):
+        if not address:
+            self.status.setText("请输入 iPhone 的 Wi-Fi IPv4 地址。")
+            return
+
+        def connected(udid):
+            self.recent_ips = remember_ip(self.recent_ips, address, udid)
+            self.settings["recent_ip_connections"] = self.recent_ips
+            self._show_recent_ips()
+            self._write_json(SETTINGS, self.settings)
+            self.ios_session.direct_addresses[udid] = address
+            target = ("ios", udid)
+            label = f"iPhone · {udid[-8:]} · {address}"
+            index = self._show_device(target, label)
+            self.device_combo.setCurrentIndex(index)
+            self.status.setText(f"已连接 {address}，定位服务可用。")
+
+        def show_hotspot(message):
+            answer = QMessageBox.question(
+                self, "未能通过 IP 连接 iPhone",
+                message + "\n\n要打开 Windows 移动热点设置吗？开启热点后，让 iPhone 加入该网络，再点击“刷新”。",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer == QMessageBox.Yes:
+                QDesktopServices.openUrl(QUrl("ms-settings:network-mobilehotspot"))
+
+        self._device_task(lambda: check_ip(address, expected), connected, "正在验证 iPhone 配对和定位服务…", show_hotspot)
+
     def prepare_ios_wireless(self):
         device = self.device_combo.currentData()
         if not device or device[0] != "ios":
@@ -889,7 +1013,7 @@ class MainWindow(QMainWindow):
         dialog.setText("拔掉 USB 数据线后，选择以下任一种连接方式：\n\n"
                        "方案 1：让电脑和 iPhone 连接同一个私人局域网。\n"
                        "方案 2：在 iPhone 开启个人热点，让电脑连接该热点。\n\n"
-                       "连接后点击 AnyWay 的“刷新”。校园网可能隔离设备，导致无法发现 iPhone。")
+                       "连接后点击“刷新”。校园网搜不到设备时，可在“目标设备”中输入 iPhone 的 Wi-Fi IPv4 地址直连。")
         skip = QCheckBox("勾选后不再显示此内容")
         dialog.setCheckBox(skip)
         dialog.setStandardButtons(QMessageBox.Ok)
@@ -1000,6 +1124,12 @@ class MainWindow(QMainWindow):
         self.clear_button.setEnabled(idle and has_device)
         self.start_button.setEnabled(idle and has_device)
         self.stop_button.setEnabled(not editing and not self.runner.stop_event.is_set())
+        self.rename_device_button.setEnabled(idle and has_device)
+        self.recent_combo.setEnabled(idle)
+        self.reconnect_button.setEnabled(idle)
+        self.rename_ip_button.setEnabled(idle)
+        self.ip_button.setEnabled(idle)
+        self.iphone_ip.setEnabled(idle)
         self.refresh_button.setEnabled(idle)
         self.wireless_button.setEnabled(idle and self.device_combo.currentData() is not None
                                         and self.device_combo.currentData()[0] == "ios")
@@ -1013,7 +1143,7 @@ class MainWindow(QMainWindow):
         self.apply_button.setEnabled(editing and self.text_pending)
         self.track_button.setEnabled(editing)
 
-    def _device_task(self, fn, done, busy_text):
+    def _device_task(self, fn, done, busy_text, on_error=None):
         self._device_busy = True
         self._update_action_state()
 
@@ -1026,6 +1156,8 @@ class MainWindow(QMainWindow):
             self._device_busy = False
             self._update_action_state()
             self.status.setText(message)
+            if on_error:
+                on_error(message)
 
         task = Task(fn)
         task.signals.result.connect(finished)

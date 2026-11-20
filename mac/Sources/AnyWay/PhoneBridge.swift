@@ -71,17 +71,30 @@ final class PhoneBridge: @unchecked Sendable {
             let transport = transports[$0].map { " · \($0)" } ?? ""
             return LocationDevice(name: "iOS 设备 · \(String($0.suffix(8)))\(transport)\(hint)",
                                   udid: $0, kind: .iphone,
-                                  needsDeveloperMode: needsDeveloperMode.contains($0))
+                                  needsDeveloperMode: needsDeveloperMode.contains($0), isUSB: transports[$0] == "USB")
         }
     }
 
+    static func checkIP(_ address: String, expectedUDID: String? = nil) throws -> LocationDevice {
+        let response = try wirelessRequest(["--check-ip", address] + (expectedUDID.map { [$0] } ?? []))
+        guard let udid = response["udid"] as? String, !udid.isEmpty else {
+            throw SimctlError.failed("无法验证 iPhone 身份。")
+        }
+        return LocationDevice(name: "iPhone · \(udid.suffix(8)) · \(address)",
+                              udid: udid, kind: .iphone, address: address)
+    }
+
     static func prepareWireless(udid: String) throws {
+        _ = try wirelessRequest(["--prepare-wireless", udid])
+    }
+
+    private static func wirelessRequest(_ arguments: [String]) throws -> [String: Any] {
         guard FileManager.default.isExecutableFile(atPath: pythonURL.path) else {
             throw SimctlError.failed("缺少 iPhone Python 支持组件。")
         }
         let task = Process()
         task.executableURL = pythonURL
-        task.arguments = [bridgeURL.path, "--prepare-wireless", udid]
+        task.arguments = [bridgeURL.path] + arguments
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
@@ -89,18 +102,19 @@ final class PhoneBridge: @unchecked Sendable {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
         let response = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        guard task.terminationStatus == 0, response?["ok"] as? Bool == true else {
+        guard task.terminationStatus == 0, let response else {
             let detail = response?["error"] as? String ?? "请先用 USB 连接、解锁并信任 iPhone。"
-            throw SimctlError.failed("无法开启 iPhone 无线连接：\(detail)")
+            throw SimctlError.failed(detail)
         }
+        return response
     }
 
-    func set(_ coordinate: Coordinate, udid: String) throws {
-        try session(for: udid).set(coordinate)
+    func set(_ coordinate: Coordinate, udid: String, address: String?) throws {
+        try session(for: udid).set(coordinate, address: address)
     }
 
-    func clear(udid: String) throws {
-        try session(for: udid).clear()
+    func clear(udid: String, address: String?) throws {
+        try session(for: udid).clear(address: address)
     }
 
     private func session(for udid: String) -> Session {
@@ -121,11 +135,11 @@ final class PhoneBridge: @unchecked Sendable {
 
         init(udid: String) { self.udid = udid }
 
-        func set(_ coordinate: Coordinate) throws {
+        func set(_ coordinate: Coordinate, address: String?) throws {
             lock.lock()
             defer { lock.unlock() }
             do {
-                try connect()
+                try connect(address: address)
                 try send(["action": "set", "latitude": coordinate.latitude,
                           "longitude": coordinate.longitude])
             } catch {
@@ -134,15 +148,15 @@ final class PhoneBridge: @unchecked Sendable {
             }
         }
 
-        func clear() throws {
+        func clear(address: String?) throws {
             lock.lock()
             defer { lock.unlock() }
             defer { disconnect() }
-            try connect()
+            try connect(address: address)
             try send(["action": "clear"])
         }
 
-        private func connect() throws {
+        private func connect(address: String?) throws {
             if process?.isRunning == true { return }
             disconnect()
             guard FileManager.default.isExecutableFile(atPath: PhoneBridge.pythonURL.path) else {
@@ -153,7 +167,7 @@ final class PhoneBridge: @unchecked Sendable {
             }
             let task = Process()
             task.executableURL = PhoneBridge.pythonURL
-            task.arguments = [PhoneBridge.bridgeURL.path, udid]
+            task.arguments = [PhoneBridge.bridgeURL.path, udid] + (address.map { [$0] } ?? [])
             let inputPipe = Pipe()
             let outputPipe = Pipe()
             task.standardInput = inputPipe

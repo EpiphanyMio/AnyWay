@@ -7,9 +7,7 @@ if [ "$(uname -m)" != arm64 ]; then
     exit 1
 fi
 
-if [ ! -x .build/iphone-venv/bin/python ]; then
-    bash scripts/install-iphone-support.sh
-fi
+bash scripts/install-iphone-support.sh
 
 .build/iphone-venv/bin/python -m unittest discover -s Tests -p test_iphone_wireless.py
 

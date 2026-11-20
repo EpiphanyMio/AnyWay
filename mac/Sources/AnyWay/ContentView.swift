@@ -14,6 +14,7 @@ struct ContentView: View {
     @AppStorage("hideWirelessGuide") private var hideWirelessGuide = false
     @State private var showingResearchNotice = false
     @State private var showingReleaseNotes = false
+    @State private var iphoneIP = RecentIPConnection.load().first?.address ?? ""
     @State private var showingWirelessGuide = false
     @State private var wirelessGuideDontShowAgain = false
     @State private var name = "我的路线"
@@ -121,6 +122,13 @@ struct ContentView: View {
             } message: {
                 Text(updateMessage ?? "")
             }
+        .alert("未能通过 IP 连接 iPhone", isPresented: Binding(
+            get: { controller.ipConnectionError != nil },
+            set: { if !$0 { controller.ipConnectionError = nil } })) {
+                Button("确定") { controller.ipConnectionError = nil }
+            } message: {
+                Text((controller.ipConnectionError ?? "") + "\n\n也可以在 iPhone 的“设置 → 个人热点”打开“允许其他人加入”，让 Mac 连接该热点，再点击“刷新”。")
+            }
         .alert("使用须知", isPresented: $showingResearchNotice) {
             Button("我已知悉") {
                 hasAcknowledgedResearchNotice = true
@@ -187,7 +195,7 @@ struct ContentView: View {
             Text("拔掉 USB 数据线后，选择以下任一种连接方式：")
             Text("方案 1：让 Mac 和 iPhone 连接同一个私人局域网。")
             Text("方案 2：在 iPhone 开启个人热点，让 Mac 连接该热点。")
-            Text("连接后点击 AnyWay 的“刷新”。校园网可能隔离设备，导致无法发现 iPhone。")
+            Text("连接后点击“刷新”。校园网搜不到设备时，可在“目标设备”中输入 iPhone 的 Wi-Fi IPv4 地址直连。")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("勾选后不再显示此内容", isOn: $wirelessGuideDontShowAgain)
             HStack {
@@ -503,11 +511,28 @@ struct ContentView: View {
                             Text("没有可用设备").foregroundStyle(.secondary)
                         }
                         ForEach(controller.devices) { device in
-                            Toggle(device.name, isOn: Binding(
-                                get: { controller.selectedDeviceIDs.contains(device.id) },
-                                set: { controller.setSelected(device.id, isSelected: $0) }
-                            ))
-                            .toggleStyle(.checkbox)
+                            HStack {
+                                Toggle(isOn: Binding(
+                                    get: { controller.selectedDeviceIDs.contains(device.id) },
+                                    set: { controller.setSelected(device.id, isSelected: $0) }
+                                )) {
+                                    if let alias = controller.deviceNames[device.id] {
+                                        VStack(alignment: .leading) {
+                                            Text(alias)
+                                            Text(device.name).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    } else {
+                                        Text(device.name)
+                                    }
+                                }
+                                .toggleStyle(.checkbox)
+                                Spacer()
+                                if device.kind != .simulator {
+                                    RenameButton(title: "设备名称", name: controller.deviceNames[device.id] ?? "") {
+                                        controller.renameDevice(device, to: $0)
+                                    }
+                                }
+                            }
                             .disabled(controller.isBusy)
                         }
                     }
@@ -522,6 +547,37 @@ struct ContentView: View {
                         }
                         .disabled(controller.isBusy)
                         .help("刷新模拟器、iPhone 与 Android 设备")
+                    }
+                    HStack {
+                        TextField("iPhone 的 Wi-Fi IPv4 地址", text: $iphoneIP)
+                            .textFieldStyle(.roundedBorder)
+                        Button("通过 IP 连接") { controller.connectIP(iphoneIP) }
+                            .disabled(iphoneIP.isEmpty || controller.isBusy)
+                    }
+                    if !controller.recentIPs.isEmpty {
+                        Text("最近使用").font(.caption).foregroundStyle(.secondary)
+                        ForEach(controller.recentIPs) { entry in
+                            HStack {
+                                Button {
+                                    iphoneIP = entry.address
+                                    controller.connectIP(entry.address, expectedUDID: entry.udid)
+                                } label: {
+                                    VStack(alignment: .leading) {
+                                        Text(entry.name.isEmpty ? entry.address : entry.name)
+                                        let phone = controller.deviceNames["iphone:" + entry.udid] ?? "iPhone · " + entry.udid.suffix(8)
+                                        Text(entry.name.isEmpty ? phone : "\(phone) · \(entry.address)")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                                .help("重新连接此 iPhone")
+                                Spacer()
+                                RenameButton(title: "网络名称", name: entry.name) {
+                                    controller.renameConnection(entry, to: $0)
+                                }
+                            }
+                            .disabled(controller.isBusy)
+                        }
                     }
                     Button("开启 iPhone 无线连接") { controller.prepareWirelessIPhones() }
                         .disabled(controller.isBusy || !controller.selectedDevices.contains(where: { $0.kind == .iphone }))
@@ -944,3 +1000,36 @@ struct ContentView: View {
     }
 }
 
+
+private struct RenameButton: View {
+    let title: String
+    let name: String
+    let save: (String) -> Void
+    @State private var editing = false
+    @State private var draft = ""
+
+    var body: some View {
+        Button {
+            draft = name
+            editing = true
+        } label: {
+            Image(systemName: "pencil")
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("编辑" + title)
+        .help("编辑" + title)
+        .popover(isPresented: $editing) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(.headline)
+                TextField("留空恢复默认显示", text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Spacer()
+                    Button("取消") { editing = false }.keyboardShortcut(.cancelAction)
+                    Button("保存") { save(draft); editing = false }.keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding().frame(width: 250)
+        }
+    }
+}

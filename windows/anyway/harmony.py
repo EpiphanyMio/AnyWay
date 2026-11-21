@@ -146,6 +146,11 @@ class HarmonyBridge:
     def __init__(self):
         self._active: set[str] = set()
         self._lock = threading.RLock()
+        self._device_locks = {}
+
+    def _device_lock(self, serial):
+        with self._lock:
+            return self._device_locks.setdefault(serial, threading.RLock())
 
     @staticmethod
     def _target(serial: str) -> list[str]:
@@ -156,17 +161,20 @@ class HarmonyBridge:
             raise ValueError("HarmonyOS 位置更新间隔须为 1～3600 秒。")
         local_path = None
         remote = "/data/local/tmp/anyway-" + hashlib.sha256(serial.encode()).hexdigest()[:12] + ".gpx"
-        with self._lock:
+        with self._device_lock(serial):
             try:
                 with tempfile.NamedTemporaryFile(suffix=".gpx", delete=False) as file:
                     local_path = Path(file.name)
                     file.write(gpx(points))
                 target = self._target(serial)
-                if serial not in self._active:
+                with self._lock:
+                    active = serial in self._active
+                if not active:
                     output = _run(target + ["shell", "testhelper", "enable-location-mock"])
                     if "successfully" not in output.lower():
                         raise RuntimeError("设备未确认启用模拟定位：" + output)
-                    self._active.add(serial)
+                    with self._lock:
+                        self._active.add(serial)
                 _run(target + ["file", "send", str(local_path), remote], timeout=30)
                 output = _run(target + ["shell", "testhelper", "set-mocked-locations", remote,
                                         str(interval)], timeout=30)
@@ -180,11 +188,12 @@ class HarmonyBridge:
         self._send_points(serial, [point], 1)
 
     def clear(self, serial: str):
-        with self._lock:
+        with self._device_lock(serial):
             output = _run(self._target(serial) + ["shell", "testhelper", "disable-location-mock"])
             if "successfully" not in output.lower():
                 raise RuntimeError("设备未确认清除模拟定位：" + output)
-            self._active.discard(serial)
+            with self._lock:
+                self._active.discard(serial)
 
     def replay(self, serial: str, config: Configuration, stop_event: threading.Event,
                status, preview):

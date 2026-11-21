@@ -102,17 +102,21 @@ struct RouteStepper: Sendable {
     let points: [Coordinate]
     let variationMeters: Double
     let seed: UInt64
-    private let totalDistance: Double
+    let totalDistance: Double
+    private let eastOffset: Double
+    private let northOffset: Double
     private(set) var segment = 0
     private(set) var distanceIntoSegment = 0.0
     private(set) var distanceTravelled = 0.0
 
-    init(points: [Coordinate], variationMeters: Double = 0, seed: UInt64 = 0) {
+    init(points: [Coordinate], variationMeters: Double = 0, seed: UInt64 = 0, eastOffset: Double = 0, northOffset: Double = 0) {
         precondition(points.count >= 2)
         precondition(variationMeters.isFinite && variationMeters >= 0)
         self.points = points
         self.variationMeters = variationMeters
         self.seed = seed
+        self.eastOffset = eastOffset
+        self.northOffset = northOffset
         self.totalDistance = zip(points, points.dropFirst()).reduce(0.0) { total, pair in
             total + pair.0.distance(to: pair.1)
         }
@@ -137,16 +141,26 @@ struct RouteStepper: Sendable {
                 let end = points[segment + 1]
                 let progress = distanceIntoSegment / length
                 let center = start.interpolated(to: end, fraction: progress)
-                guard variationMeters > 0 else { return center }
+                guard variationMeters > 0 || eastOffset != 0 || northOffset != 0 else { return center }
                 let drift = positionDrift(distance: distanceTravelled)
-                return center.offset(eastMeters: drift.east, northMeters: drift.north)
+                return center.offset(eastMeters: eastOffset + drift.east, northMeters: northOffset + drift.north)
             }
             remaining -= available
             distanceTravelled += available
             segment += 1
             distanceIntoSegment = 0
         }
-        return points[points.count - 1]
+        return points[points.count - 1].offset(eastMeters: eastOffset, northMeters: northOffset)
+    }
+
+    func preview() -> [Coordinate] {
+        var stepper = RouteStepper(points: points, variationMeters: variationMeters, seed: seed,
+                                   eastOffset: eastOffset, northOffset: northOffset)
+        let spacing = max(4, totalDistance / 3999)
+        var samples = [stepper.advance(meters: 0)]
+        while !stepper.isFinished && samples.count < 3999 { samples.append(stepper.advance(meters: spacing)) }
+        if !stepper.isFinished { samples.append(stepper.advance(meters: totalDistance)) }
+        return samples
     }
 
     private func positionDrift(distance: Double) -> (east: Double, north: Double) {

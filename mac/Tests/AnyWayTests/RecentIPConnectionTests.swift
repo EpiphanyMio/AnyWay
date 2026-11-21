@@ -12,7 +12,8 @@ final class RecentIPConnectionTests: XCTestCase {
         let legacy = controller.recentIPs[0]
         controller.renameConnection(legacy, to: " 校园网 ")
         let usb = LocationDevice(name: "USB", udid: "A", kind: .iphone, isUSB: true)
-        controller.renameDevice(usb, to: " 我的手机 ")
+        XCTAssertEqual(legacy.deviceID, usb.id)
+        controller.renameDevice(id: legacy.deviceID, to: " 我的手机 ")
         let relaunched = SimulatorController(defaults: defaults)
         let wifi = LocationDevice(name: "Wi-Fi", udid: "A", kind: .iphone, address: legacy.address)
         XCTAssertEqual(relaunched.deviceNames[wifi.id], "我的手机")
@@ -24,7 +25,7 @@ final class RecentIPConnectionTests: XCTestCase {
         XCTAssertEqual(entries.map(\.udid), ["A", "B", "A"])
         RecentIPConnection.save(entries, to: defaults)
         XCTAssertEqual(RecentIPConnection.load(from: defaults), entries)
-        relaunched.renameDevice(wifi, to: " ")
+        relaunched.renameDevice(id: wifi.id, to: " ")
         XCTAssertNil(SimulatorController(defaults: defaults).deviceNames[usb.id])
     }
 }

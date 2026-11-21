@@ -1,6 +1,6 @@
 import Foundation
 
-struct RouteConfiguration: Codable, Equatable {
+struct RouteConfiguration: Codable, Equatable, Sendable {
     let schemaVersion: Int
     let name: String
     let point: Coordinate

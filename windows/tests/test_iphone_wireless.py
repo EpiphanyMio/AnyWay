@@ -9,7 +9,8 @@ from pymobiledevice3.remote import userspace_tunnel
 
 class WirelessIPhoneTests(unittest.IsolatedAsyncioTestCase):
     def test_crypto_check_requires_psk_component(self):
-        with patch.object(iphone_wireless, "SSLPSKContext", None):
+        with patch.object(iphone_wireless, "SSLPSKContext", None), \
+             patch.object(iphone_wireless.sys, "version_info", (3, 12)):
             with self.assertRaisesRegex(RuntimeError, "SSL-PSK"):
                 iphone_wireless.check_wireless_crypto()
 

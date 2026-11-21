@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import ctypes
 import json
 from pathlib import Path
 import random
@@ -10,17 +11,17 @@ import threading
 import time
 
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QTextDocument
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QMenu, QToolButton,
     QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox, QSplitter,
     QTabWidget, QTextEdit, QVBoxLayout, QWidget)
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from .core import (Configuration, Coordinate, DynamicPlan, MotionProfile, RouteStepper,
-                   closed, generate_track, pace_to_speed, parse_points, speed_to_pace)
+from .core import (Configuration, Coordinate, DynamicPlan, LiveRoute, RouteStepper,
+                   closed, generate_track, pace_to_speed, parse_points, route_length, speed_to_pace)
 from .ios import PhoneSession, check_ip, connected_devices_with_status, prepare_wireless
 from .place_search import USER_AGENT, nearby_sports, search_places
 from .release_notes import load as load_release_notes
@@ -32,6 +33,9 @@ from .harmony import (HarmonyBridge, configure_hdc,
                       connected_devices as connected_harmony_devices,
                       harmony_usb_connected)
 from .user_data import APP_DIR, DRAFT, SETTINGS, migrate_legacy_data, recent_ip_connections, remember_ip
+
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
 
 RESEARCH_NOTICE = ("本软件仅用于研究学习 Apple Developer Toolkit 和 Android Debug Bridge，禁止用于作弊、造假等任何非法行为。"
                    "下载学习后请于 24 小时内删除本软件。使用者因不当使用造成的不良影响由本人自行承担，与开发者无关。")
@@ -55,34 +59,72 @@ class Task(QRunnable):
             self.signals.error.emit(str(exc))
 
 
-class UpdateRequiredDialog(QDialog):
-    def __init__(self, parent, result: UpdateResult):
-        super().__init__(parent)
-        self.setWindowTitle("需要更新 AnyWay")
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+class UpdateSettings(QWidget):
+    def __init__(self, current, check, ignore):
+        super().__init__()
+        self.result = None
         layout = QVBoxLayout(self)
-        message = QLabel(f"发现新版本 {result.latest}（当前 {result.current}）。\n"
-                         "请先下载安装最新版，再继续使用。")
-        message.setWordWrap(True)
-        layout.addWidget(message)
+        layout.setContentsMargins(0, 0, 0, 0)
+        current_row = QHBoxLayout()
+        current_row.addWidget(QLabel(f"当前版本：{current}"), 1)
+        self.check_button = QPushButton("检查更新")
+        self.check_button.clicked.connect(check)
+        current_row.addWidget(self.check_button)
+        layout.addLayout(current_row)
+
+        self.latest_row = QWidget()
+        latest_layout = QHBoxLayout(self.latest_row)
+        latest_layout.setContentsMargins(0, 0, 0, 0)
+        self.toggle = QToolButton()
+        self.toggle.setCheckable(True)
+        self.toggle.setAutoRaise(True)
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.toggled.connect(self._expand)
+        latest_layout.addWidget(self.toggle)
+        latest_layout.addStretch()
+        self.ignore_button = QPushButton("忽略本次更新")
+        self.ignore_button.clicked.connect(lambda: ignore(self.result))
+        latest_layout.addWidget(self.ignore_button)
+        layout.addWidget(self.latest_row)
+
+        self.details = QWidget()
+        details_layout = QVBoxLayout(self.details)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        self.notes = QTextEdit()
+        self.notes.setReadOnly(True)
+        self.notes.setFixedHeight(150)
+        details_layout.addWidget(self.notes)
         download = QPushButton("打开新版下载页")
-        download.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(result.release_url)))
-        layout.addWidget(download)
-        quit_button = QPushButton("退出软件")
-        quit_button.clicked.connect(self._quit)
-        layout.addWidget(quit_button)
-        self.setMinimumWidth(370)
+        download.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.result.release_url)))
+        details_layout.addWidget(download, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.details)
+        self.latest_row.hide()
+        self._expand(False)
 
-    def _quit(self):
-        self.accept()
-        QApplication.instance().quit()
+    def _expand(self, expanded):
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.details.setVisible(expanded and self.result is not None and self.result.available)
 
-    def reject(self):
-        pass
-
-    def closeEvent(self, event):
-        event.ignore()
+    def render(self, result, ignored_through, checking):
+        previous = self.result
+        self.result = result
+        self.check_button.setEnabled(not checking)
+        self.check_button.setText("正在检查…" if checking else "检查更新")
+        available = bool(result and result.available)
+        self.latest_row.setVisible(available)
+        if available:
+            if previous is None or previous.latest != result.latest:
+                self.toggle.setChecked(False)
+            self.toggle.setText(f"最新版本：{result.latest}")
+            can_ignore = result.should_prompt(ignored_through)
+            self.ignore_button.setEnabled(can_ignore)
+            self.ignore_button.setText("忽略本次更新" if can_ignore else "已忽略此版本")
+            if result.notes:
+                self.notes.document().setMarkdown(
+                    result.notes, QTextDocument.MarkdownFeature.MarkdownNoHTML)
+            else:
+                self.notes.setPlainText("发布页暂无更新说明。")
+        self._expand(self.toggle.isChecked())
 
 
 class _ClickToWheelSpinBox:
@@ -141,62 +183,94 @@ class MapBridge(QObject):
 
 class RouteSignals(QObject):
     status = Signal(str)
-    point = Signal(object)
-    preview = Signal(object)
-    finished = Signal()
+    preview = Signal(object, object)
+    finished = Signal(object, str)
 
 
 class RouteRunner(QRunnable):
-    def __init__(self, session, udid, config):
+    def __init__(self, session, target, config, seed, index, count):
         super().__init__()
-        self.session, self.udid, self.config = session, udid, config
+        self.session, self.target = session, target
+        self._configuration = config
+        self._lock = threading.Lock()
+        self.route = LiveRoute(config, seed, index, count)
         self.stop_event = threading.Event()
         self.signals = RouteSignals()
 
+    def update(self, config):
+        with self._lock:
+            self._configuration = config
+
+    def _update_route(self):
+        with self._lock:
+            self.route.update(self._configuration)
+
     def run(self):
-        c = self.config
-        if hasattr(self.session, "replay"):
-            try:
-                self.session.replay(self.udid, c, self.stop_event,
-                                    self.signals.status.emit, self.signals.preview.emit)
-            except Exception as exc:
-                self.signals.status.emit(f"模拟失败：{exc}")
-            finally:
-                self.signals.finished.emit()
-            return
-        points = closed(c.route)
-        seed = random.getrandbits(64)
-        motion = MotionProfile(c.speedMetersPerSecond, c.dynamicSpeed, c.dynamicSpeedPlan, seed)
-        offset = 0.0
+        route = self.route
+        tick = 1 if self.target[0] == "harmony" else .5
+        error = ""
+        execution_state = None
+        previous_state = 0
+        controls_awake = getattr(self.session, "set_keep_awake", None)
+        wake_available = False
+        wake_attempted = False
         try:
-            self.session.set(self.udid, points[0])
-            self.signals.point.emit(points[0])
-            for lap in range(c.passes):
+            if self.stop_event.is_set():
+                return
+            if sys.platform == "win32":
+                execution_state = ctypes.windll.kernel32.SetThreadExecutionState
+                execution_state.argtypes = [ctypes.c_uint32]
+                execution_state.restype = ctypes.c_uint32
+                # Continuous and system required. Each worker owns its own request.
+                previous_state = execution_state(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
+            self.session.set(self.target[1], route.point)
+            if controls_awake and not self.stop_event.is_set():
+                wake_attempted = True
+                wake_available = self._request_awake(controls_awake, True)
+            supports_wake = wake_available
+            last = time.monotonic()
+            next_wake_renewal = last + 15
+            previous_status = ""
+            while not self.stop_event.is_set() and not route.finished:
+                self._update_route()
+                if route.finished:
+                    break
+                if route.preview_changed:
+                    self.signals.preview.emit(self.target, route.preview())
+                recovery = " · 低速段" if route.motion.recovery_left else ""
+                wake_status = "" if wake_available else " · 设备端防休眠不可用"
+                status = f"{self.target[1][-8:]} · 第 {route.lap + 1}/{route.config.passes} 圈{recovery}{wake_status}"
+                if status != previous_status:
+                    self.signals.status.emit(status)
+                    previous_status = status
+                if self.stop_event.wait(max(0, tick - (time.monotonic() - last))):
+                    break
+                if supports_wake and time.monotonic() >= next_wake_renewal:
+                    wake_available = self._request_awake(controls_awake, True)
+                    next_wake_renewal = time.monotonic() + (15 if wake_available else 4)
                 if self.stop_event.is_set():
                     break
-                stepper = RouteStepper(points, c.pathVariationMeters, seed + lap)
-                self.signals.preview.emit((points, seed + lap))
-                self.signals.status.emit(f"正在运行第 {lap + 1}/{c.passes} 圈。")
-                last = time.monotonic()
-                while not stepper.finished and not self.stop_event.is_set():
-                    self.stop_event.wait(max(0, .5 - (time.monotonic() - last)))
-                    if self.stop_event.is_set():
-                        break
-                    now = time.monotonic()
-                    elapsed = max(.001, now - last)
-                    last = now
-                    offset = .8 * offset + .2 * random.uniform(-c.jitterPercent / 100, c.jitterPercent / 100)
-                    point = stepper.advance(motion.advance(elapsed, 1 + offset))
-                    self.session.set(self.udid, point)
-                    self.signals.point.emit(point)
-                    if c.dynamicSpeed and motion.recovery_left:
-                        self.signals.status.emit(f"正在运行第 {lap + 1}/{c.passes} 圈 · 低速段。")
-            self.signals.status.emit("路径模拟已停止，定位停留在当前点。" if self.stop_event.is_set()
-                                     else "路径模拟完成，定位停留在最后一个点。")
+                now = time.monotonic()
+                self._update_route()
+                if route.finished:
+                    break
+                self.session.set(self.target[1], route.advance(now - last))
+                last = now
         except Exception as exc:
-            self.signals.status.emit(f"模拟失败：{exc}")
+            error = f"{self.target[1][-8:]} · {exc}"
         finally:
-            self.signals.finished.emit()
+            if wake_attempted:
+                self._request_awake(controls_awake, False)
+            if previous_state:
+                execution_state(previous_state | ES_CONTINUOUS)
+            self.signals.finished.emit(self.target, error)
+
+    def _request_awake(self, control, enabled):
+        try:
+            control(self.target[1], enabled)
+            return True
+        except (OSError, RuntimeError, ValueError):
+            return False
 
 
 class MainWindow(QMainWindow):
@@ -206,10 +280,26 @@ class MainWindow(QMainWindow):
         available = QApplication.primaryScreen().availableGeometry()
         self.resize(min(1250, available.width()), min(820, available.height()))
         self.pool = QThreadPool.globalInstance()
-        self.ios_session = PhoneSession()
+        self.direct_iphone_addresses = {}
+        self.ios_sessions = {}
         self.android_bridge = AndroidBridge()
         self.harmony_bridge = HarmonyBridge()
-        self.runner = None
+        self.runners = {}
+        self._run_errors = []
+        self._stopping = False
+        self._previews = {}
+        self._refreshing = False
+        self._usb_iphones = set()
+        self._update_result = None
+        self._update_check_running = False
+        self._manual_update_check = False
+        self.update_settings = None
+        self._route_scope = None
+        self._loading_draft = False
+        self._shared_draft = None
+        self._device_drafts = {}
+        self._editor_baseline = None
+        self._last_live_draft = None
         self._device_busy = False
         self.points = []
         self.places = []
@@ -217,7 +307,6 @@ class MainWindow(QMainWindow):
         self.text_pending = False
         self._cleared_draft_snapshot = None
         self.map_ready = False
-        self.groups = []
         self.settings = self._read_json(SETTINGS, {"restore": True, "auto_refresh": True, "history": []})
         self.recent_ips = recent_ip_connections(self.settings)
         self.device_aliases = self.settings.setdefault("device_aliases", {})
@@ -226,6 +315,9 @@ class MainWindow(QMainWindow):
         QApplication.styleHints().colorSchemeChanged.connect(self._system_theme_changed)
         self._load_draft()
         self._update_action_state()
+        self.live_timer = QTimer(self)
+        self.live_timer.timeout.connect(self._update_live_route)
+        self.live_timer.setInterval(250)
         self.draft_timer = QTimer(self)
         self.draft_timer.timeout.connect(self._save_draft)
         self.draft_timer.start(2000)
@@ -251,7 +343,6 @@ class MainWindow(QMainWindow):
 
     def _box(self, title, parent):
         box = QGroupBox(title)
-        self.groups.append(box)
         layout = QVBoxLayout(box)
         parent.addWidget(box)
         return layout
@@ -271,10 +362,20 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("appSubtitle")
         toolbar.addWidget(subtitle)
         toolbar.addStretch()
-        self._button("设置", self.show_settings, toolbar)
+        self._button("设置", lambda: self.show_settings(), toolbar)
         self.import_button = self._button("导入配置", self.import_config, toolbar)
         self.save_button = self._button("保存配置", self.save_config, toolbar)
         outer.addLayout(toolbar)
+        self.update_banner = QWidget()
+        banner = QHBoxLayout(self.update_banner)
+        banner.setContentsMargins(10, 2, 10, 2)
+        self.update_banner.setObjectName("updateBanner")
+        self.update_banner_text = QLabel()
+        banner.addWidget(self.update_banner_text, 1)
+        self._button("查看更新", self._show_update_details, banner)
+        self._button("稍后", self.update_banner.hide, banner)
+        self.update_banner.hide()
+        outer.addWidget(self.update_banner)
         splitter = QSplitter(Qt.Horizontal)
         outer.addWidget(splitter, 1)
         left = QWidget()
@@ -351,6 +452,13 @@ class MainWindow(QMainWindow):
 
         route = self._box("路径编辑", side)
         self.name = QLineEdit("我的路线")
+        self.route_editor = QComboBox()
+        self.route_editor.addItem("共用配置")
+        self.route_editor.currentIndexChanged.connect(self._switch_route_editor)
+        route.addWidget(QLabel("编辑路线"))
+        route.addWidget(self.route_editor)
+        self.restore_shared_button = self._button("恢复使用共用配置", self._restore_shared_route, route)
+        self.restore_shared_button.hide()
         route.addWidget(self.name)
         self.editor_tabs = QTabWidget()
         map_tab = QWidget()
@@ -411,6 +519,7 @@ class MainWindow(QMainWindow):
         self.variation.setValue(2)
         self.variation.valueChanged.connect(lambda: self.draw_map(False))
         form.addRow("路线偏移上限 m", self.variation)
+        self.variation.setToolTip("偏移设为 0 时使用 0.5 米上限，短路线按比例缩小。")
         params.addLayout(form)
         self.dynamic = QCheckBox("动态速度")
         params.addWidget(self.dynamic)
@@ -450,6 +559,16 @@ class MainWindow(QMainWindow):
         self.status.setObjectName("statusLabel")
         self.status.setWordWrap(True)
         outer.addWidget(self.status)
+        for widget in (self.speed, self.jitter, self.passes, self.variation, self.interval,
+                       self.low_min, self.low_sec, self.recovery, self.pace_min, self.pace_sec):
+            widget.valueChanged.connect(self._store_current_device_draft)
+        for widget in (self.dynamic_mode, self.preset):
+            widget.currentIndexChanged.connect(self._store_current_device_draft)
+        self.editor_tabs.currentChanged.connect(self._store_current_device_draft)
+        self.dynamic.toggled.connect(self._store_current_device_draft)
+        for widget in (self.name, self.latitude, self.longitude):
+            widget.textChanged.connect(self._store_current_device_draft)
+        self.route_text.textChanged.connect(self._store_current_device_draft)
         notice = QLabel("仅供开发工具研究学习；请勿用于作弊、造假或其他违法用途。使用后请于 24 小时内删除，使用者自行承担不当使用的后果。")
         notice.setObjectName("noticeLabel")
         notice.setWordWrap(True)
@@ -458,43 +577,75 @@ class MainWindow(QMainWindow):
     def _build_device_panel(self, side):
         devices = self._box("目标设备", side)
         self.device_combo = QComboBox()
+        self.device_combo.setPlaceholderText("没有可用设备")
         self.device_combo.currentIndexChanged.connect(lambda _index: self._update_action_state())
         target_row = QHBoxLayout()
         target_row.addWidget(self.device_combo, 1)
         self.rename_device_button = self._button("设备命名", self.rename_device, target_row)
         devices.addLayout(target_row)
-        row = QHBoxLayout()
-        self.refresh_button = self._button("刷新", self.refresh_devices, row)
-        self._button("检查 iOS 驱动", self.check_ios_drivers, row)
-        devices.addLayout(row)
-        self.wireless_button = self._button("开启 iPhone 无线连接", self.prepare_ios_wireless, devices)
+
+        actions = QHBoxLayout()
+        self.route_targets = QToolButton()
+        self.route_targets.setText("选择模拟设备")
+        self.route_targets.setMinimumWidth(132)
+        self.route_targets.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.route_targets.setMenu(QMenu(self.route_targets))
+        actions.addWidget(self.route_targets)
+        actions.addStretch()
+        self.refresh_button = self._button("刷新设备", self.refresh_devices, actions)
+        devices.addLayout(actions)
+
+        wireless = self._box("iPhone 无线连接", side)
         ip_row = QHBoxLayout()
         self.iphone_ip = QLineEdit(self.recent_ips[0]["address"] if self.recent_ips else "")
-        self.iphone_ip.setPlaceholderText("iPhone 的 Wi-Fi IPv4 地址")
-        ip_row.addWidget(self.iphone_ip)
+        self.iphone_ip.setPlaceholderText("iPhone IPv4 地址")
+        ip_row.addWidget(self.iphone_ip, 1)
         self.ip_button = self._button("通过 IP 连接", self.connect_ios_ip, ip_row)
-        devices.addLayout(ip_row)
+        self.ip_button.setObjectName("primaryButton")
+        wireless.addLayout(ip_row)
         self.recent_label = QLabel("最近使用")
-        devices.addWidget(self.recent_label)
+        wireless.addWidget(self.recent_label)
         self.recent_combo = QComboBox()
         self.recent_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        devices.addWidget(self.recent_combo)
+        wireless.addWidget(self.recent_combo)
         recent_row = QHBoxLayout()
         self.reconnect_button = self._button("重新连接", self.reconnect_recent_ip, recent_row)
+        self.rename_recent_device_button = self._button("设备命名", self.rename_recent_device, recent_row)
         self.rename_ip_button = self._button("网络命名", self.rename_recent_ip, recent_row)
-        devices.addLayout(recent_row)
+        wireless.addLayout(recent_row)
         self._show_recent_ips()
-        device_hint = QLabel("iPhone 可通过 USB 或已配对的 Wi-Fi 连接；首次无线连接请先用 USB 准备。")
-        device_hint.setWordWrap(True)
-        devices.addWidget(device_hint)
+
+        setup = QWidget()
+        setup_layout = QVBoxLayout(setup)
+        setup_layout.setContentsMargins(8, 0, 0, 0)
+        hint = QLabel("用 USB 连接并选中 iPhone，再开启无线连接。")
+        hint.setWordWrap(True)
+        setup_layout.addWidget(hint)
+        setup_actions = QHBoxLayout()
+        self.wireless_button = self._button("开启无线连接", self.prepare_ios_wireless, setup_actions)
+        self._button("检查 iOS 驱动", self.check_ios_drivers, setup_actions)
+        setup_layout.addLayout(setup_actions)
         self.driver_guide = QLabel()
         self.driver_guide.setTextFormat(Qt.RichText)
         self.driver_guide.setOpenExternalLinks(True)
         self.driver_guide.setWordWrap(True)
         self.driver_guide.hide()
-        devices.addWidget(self.driver_guide)
-        self.repair_button = self._button("一键补全 iOS 驱动", self.repair_ios_drivers, devices)
+        setup_layout.addWidget(self.driver_guide)
+        self.repair_button = self._button("一键补全 iOS 驱动", self.repair_ios_drivers, setup_layout)
         self.repair_button.hide()
+
+        disclosure = QToolButton()
+        disclosure.setText("首次无线配对")
+        disclosure.setCheckable(True)
+        disclosure.setAutoRaise(True)
+        disclosure.setArrowType(Qt.ArrowType.RightArrow)
+        disclosure.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        disclosure.toggled.connect(setup.setVisible)
+        disclosure.toggled.connect(lambda open_: disclosure.setArrowType(
+            Qt.ArrowType.DownArrow if open_ else Qt.ArrowType.RightArrow))
+        wireless.addWidget(disclosure, alignment=Qt.AlignmentFlag.AlignLeft)
+        wireless.addWidget(setup)
+        setup.hide()
 
     def _apply_style(self):
         mode = self.settings.get("appearance", "system")
@@ -517,6 +668,7 @@ class MainWindow(QMainWindow):
         sheet = """
             QWidget { color: #1c2938; font-size: 13px; }
             QMainWindow, QWidget#centralRoot, QWidget#sidebar, QDialog { background: #f5f7fa; }
+            QWidget#updateBanner { background: #e9f5f3; border-radius: 9px; }
             QLabel#appTitle { font-size: 25px; font-weight: 700; color: #102d3b; }
             QLabel#appSubtitle { color: #677989; margin-left: 8px; }
             QGroupBox { background: #ffffff; border: 1px solid #dce5eb; border-radius: 16px;
@@ -635,11 +787,11 @@ class MainWindow(QMainWindow):
             self.refresh_devices()
         QTimer.singleShot(300, self.check_for_updates)
 
-    def _task(self, fn, done, busy_text):
+    def _task(self, fn, done, busy_text, on_error=None):
         self.status.setText(busy_text)
         task = Task(fn)
         task.signals.result.connect(done)
-        task.signals.error.connect(self.status.setText)
+        task.signals.error.connect(on_error or self.status.setText)
         self.pool.start(task)
 
     def _map_loaded(self, ok):
@@ -655,6 +807,8 @@ class MainWindow(QMainWindow):
             self.map.page().runJavaScript(function + "(" + ",".join(json.dumps(a, ensure_ascii=False) for a in args) + ")")
 
     def draw_map(self, fit=False, preview=None):
+        if preview is None:
+            preview = self._previews.get(self._preview_target())
         if preview is None:
             preview = closed(self.points)
             if len(preview) >= 2:
@@ -672,14 +826,12 @@ class MainWindow(QMainWindow):
             single = None
         self._js("draw", [asdict(p) for p in self.points], [asdict(p) for p in preview],
                  asdict(single) if single else None, asdict(selected) if selected else None,
-                 fit, not self.runner and not self.text_pending)
+                 fit, not self.text_pending)
 
     def _single_coordinate(self):
         return Coordinate(float(self.latitude.text()), float(self.longitude.text()))
 
     def map_clicked(self, latitude, longitude):
-        if self.runner:
-            return
         point = Coordinate(latitude, longitude)
         if self.pick_point.isChecked():
             self.latitude.setText(str(latitude))
@@ -695,8 +847,7 @@ class MainWindow(QMainWindow):
         self.draw_map(False)
 
     def map_point_moved(self, index, latitude, longitude):
-        if self.runner or self.text_pending or not 0 <= index < len(self.points):
-            self.draw_map(False)
+        if self.text_pending or not 0 <= index < len(self.points):
             return
         try:
             self.points[index] = Coordinate(latitude, longitude)
@@ -717,12 +868,14 @@ class MainWindow(QMainWindow):
         self.route_text.setPlainText("\n".join(f"{p.latitude:.8f},{p.longitude:.8f}" for p in self.points))
         self.route_text.blockSignals(False)
         self.text_pending = False
+        self._store_current_device_draft()
         self._update_action_state()
 
     def apply_text(self):
         try:
             self.points = parse_points(self.route_text.toPlainText())
             self.text_pending = False
+            self._store_current_device_draft()
             self._update_action_state()
             self.draw_map(True)
             self.status.setText(f"已应用 {len(self.points)} 个路径点。")
@@ -730,16 +883,15 @@ class MainWindow(QMainWindow):
             self.status.setText(str(exc))
 
     def undo_point(self):
-        if not self.runner and self.points:
+        if self.points:
             self.points.pop()
             self._sync_text()
             self.draw_map(True)
 
     def clear_route(self):
-        if not self.runner:
-            self.points = []
-            self._sync_text()
-            self.draw_map(False)
+        self.points = []
+        self._sync_text()
+        self.draw_map(False)
 
     def make_track(self):
         try:
@@ -770,12 +922,11 @@ class MainWindow(QMainWindow):
             widget.blockSignals(False)
 
     def _configuration(self):
-        if self.text_pending:
-            raise ValueError("坐标文本有未应用的修改，请先点击“应用到地图”。")
+        points = parse_points(self.route_text.toPlainText()) if self.text_pending else self.points[:]
         plan = DynamicPlan(self.dynamic_mode.currentData(), self.preset.currentData(),
                            self.interval.value(), self.low_min.value() * 60 + self.low_sec.value(),
                            self.recovery.value())
-        config = Configuration(self.name.text(), self._single_coordinate(), self.points[:],
+        config = Configuration(self.name.text(), self._single_coordinate(), points,
                                self.speed.value(), self.jitter.value(), self.passes.value(),
                                self.variation.value(), self.dynamic.isChecked(), plan)
         config.validate()
@@ -823,9 +974,10 @@ class MainWindow(QMainWindow):
         self.draw_map(True)
 
     def refresh_devices(self):
-        if self.runner or self._device_busy:
+        if self.runners or self._device_busy or self._refreshing:
             return
-        saved = self.recent_ips[0] if self.recent_ips else {}
+        self._refreshing = True
+        self._update_action_state()
 
         def discover():
             found, errors = [], []
@@ -848,23 +1000,34 @@ class MainWindow(QMainWindow):
                     found.extend((kind, identifier) for identifier in lookup())
                 except RuntimeError as exc:
                     errors.append(str(exc))
-            direct_addresses = {}
-            address, udid = saved.get("address"), saved.get("udid")
-            if address and udid and iphone_transports.get(udid) != "USB":
-                try:
-                    check_ip(address, udid)
-                    direct_addresses[udid] = address
-                    iphone_transports[udid] = address
+            return found, errors, harmony_attached, developer_mode_required, iphone_transports
+
+        def finished(result):
+            self._refreshing = False
+            if not self.runners and not self._device_busy:
+                found, errors, harmony_attached, required, transports = result
+                direct = {udid: address for udid, address in self.direct_iphone_addresses.items()
+                          if transports.get(udid) != "USB"}
+                for udid, address in direct.items():
                     if ("ios", udid) not in found:
                         found.append(("ios", udid))
-                except RuntimeError as exc:
-                    errors.append(str(exc))
-            return found, errors, harmony_attached, developer_mode_required, iphone_transports, direct_addresses
-        self._device_task(discover, self._set_devices, "正在查找 iPhone、Android 和 HarmonyOS 设备…")
+                    transports[udid] = address
+                self._set_devices((found, errors, harmony_attached, required, transports, direct))
+            self._update_action_state()
+
+        def failed(message):
+            self._refreshing = False
+            self._update_action_state()
+            if not self.runners and not self._device_busy:
+                self.status.setText(message)
+
+        self._task(discover, finished, "正在刷新已发现的设备…", failed)
 
     def _set_devices(self, result):
         devices, errors, harmony_attached, developer_mode_required, iphone_transports, direct_addresses = result
-        self.ios_session.direct_addresses = direct_addresses
+        self._usb_iphones = {udid for udid, transport in iphone_transports.items() if transport == "USB"}
+        self.direct_iphone_addresses.clear()
+        self.direct_iphone_addresses.update(direct_addresses)
         previous = self.device_combo.currentData()
         self.device_combo.clear()
         for kind, identifier in devices:
@@ -877,6 +1040,9 @@ class MainWindow(QMainWindow):
             index = self._show_device(target, label)
             if target == previous:
                 self.device_combo.setCurrentIndex(index)
+        if self.device_combo.currentIndex() < 0 and self.device_combo.count():
+            self.device_combo.setCurrentIndex(0)
+        self._sync_route_devices()
         self._update_action_state()
         self.status.setText((f"找到 {len(devices)} 台设备。" if devices else "未找到设备。")
                             + (" " + "；".join(errors) if errors and not devices else ""))
@@ -921,10 +1087,16 @@ class MainWindow(QMainWindow):
         return index
 
     def rename_device(self):
-        index = self.device_combo.currentIndex()
-        target = self.device_combo.itemData(index)
-        if not target:
-            return
+        target = self.device_combo.currentData()
+        if target:
+            self._edit_device_name(target)
+
+    def rename_recent_device(self):
+        index = self.recent_combo.currentIndex()
+        if index >= 0:
+            self._edit_device_name(("ios", self.recent_ips[index]["udid"]))
+
+    def _edit_device_name(self, target):
         key = ":".join(target)
         name, ok = QInputDialog.getText(self, "设备名称", "设备名称（留空恢复默认显示）",
                                         text=self.device_aliases.get(key, ""))
@@ -934,16 +1106,24 @@ class MainWindow(QMainWindow):
             else:
                 self.device_aliases.pop(key, None)
             self._write_json(SETTINGS, self.settings)
-            self._show_device(target, self.device_combo.itemData(index, Qt.ItemDataRole.ToolTipRole))
+            for index in range(self.device_combo.count()):
+                if self.device_combo.itemData(index) == target:
+                    self._show_device(target, self.device_combo.itemData(index, Qt.ItemDataRole.ToolTipRole))
+                    break
             self._show_recent_ips(self.recent_combo.currentIndex())
+            self._sync_route_devices()
 
     def _show_recent_ips(self, index=0):
         self.recent_combo.clear()
         for row in self.recent_ips:
             phone = self.device_aliases.get("ios:" + row["udid"], "iPhone · " + row["udid"][-8:])
-            self.recent_combo.addItem(" · ".join(filter(None, [row["name"], row["address"], phone])))
+            network = f'网络：{row["name"]} · ' if row["name"] else ""
+            label = f'{phone} · {network}{row["address"]}'
+            self.recent_combo.addItem(label)
+            self.recent_combo.setItemData(self.recent_combo.count() - 1, label, Qt.ItemDataRole.ToolTipRole)
         self.recent_combo.setCurrentIndex(index)
-        for widget in (self.recent_label, self.recent_combo, self.reconnect_button, self.rename_ip_button):
+        for widget in (self.recent_label, self.recent_combo, self.reconnect_button,
+                       self.rename_recent_device_button, self.rename_ip_button):
             widget.setVisible(bool(self.recent_ips))
 
     def rename_recent_ip(self):
@@ -978,11 +1158,12 @@ class MainWindow(QMainWindow):
             self.settings["recent_ip_connections"] = self.recent_ips
             self._show_recent_ips()
             self._write_json(SETTINGS, self.settings)
-            self.ios_session.direct_addresses[udid] = address
+            self.direct_iphone_addresses[udid] = address
             target = ("ios", udid)
             label = f"iPhone · {udid[-8:]} · {address}"
             index = self._show_device(target, label)
             self.device_combo.setCurrentIndex(index)
+            self._sync_route_devices()
             self.status.setText(f"已连接 {address}，定位服务可用。")
 
         def show_hotspot(message):
@@ -997,7 +1178,7 @@ class MainWindow(QMainWindow):
 
     def prepare_ios_wireless(self):
         device = self.device_combo.currentData()
-        if not device or device[0] != "ios":
+        if not device or device[0] != "ios" or device[1] not in self._usb_iphones:
             QMessageBox.information(self, "开启 iPhone 无线连接", "请先用 USB 连接并选中 iPhone。")
             return
         self._device_task(lambda: prepare_wireless(device[1]), self._wireless_prepared,
@@ -1049,13 +1230,20 @@ class MainWindow(QMainWindow):
         target = self.device_combo.currentData()
         if not target:
             raise ValueError("请先连接并选择设备。")
+        return self._backend(target), target[1]
+
+    def _backend(self, target):
         kind, identifier = target
-        backend = {"ios": self.ios_session, "android": self.android_bridge,
-                   "harmony": self.harmony_bridge}[kind]
-        return backend, identifier
+        if kind == "ios":
+            if identifier not in self.ios_sessions:
+                session = PhoneSession()
+                session.direct_addresses = self.direct_iphone_addresses
+                self.ios_sessions[identifier] = session
+            return self.ios_sessions[identifier]
+        return self.android_bridge if kind == "android" else self.harmony_bridge
 
     def set_point(self):
-        if self.runner or self._device_busy:
+        if self.runners or self._device_busy:
             return
         try:
             backend, identifier = self._target()
@@ -1067,7 +1255,7 @@ class MainWindow(QMainWindow):
             self.status.setText(str(exc))
 
     def clear_location(self):
-        if self.runner or self._device_busy:
+        if self.runners or self._device_busy:
             return
         try:
             backend, identifier = self._target()
@@ -1076,72 +1264,186 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self.status.setText(str(exc))
 
-    def start_route(self):
-        if self.runner or self._device_busy:
+    def _sync_route_devices(self):
+        menu = self.route_targets.menu()
+        checked = {action.data() for action in menu.actions() if action.isChecked()}
+        menu.clear()
+        self.route_editor.blockSignals(True)
+        self.route_editor.clear()
+        self.route_editor.addItem("共用配置")
+        for index in range(self.device_combo.count()):
+            target = self.device_combo.itemData(index)
+            label = self.device_combo.itemText(index)
+            action = menu.addAction(label)
+            action.setData(target)
+            action.setCheckable(True)
+            action.setChecked(target in checked)
+            self.route_editor.addItem(label, target)
+            if target == self._route_scope:
+                self.route_editor.setCurrentIndex(self.route_editor.count() - 1)
+        if self._route_scope and not self.route_editor.currentData():
+            self.route_editor.addItem("已断开的设备", self._route_scope)
+            self.route_editor.setCurrentIndex(self.route_editor.count() - 1)
+        self.route_editor.blockSignals(False)
+
+    def _switch_route_editor(self, _index):
+        scope = self.route_editor.currentData()
+        if scope == self._route_scope:
+            return
+        self._update_live_route()
+        current = self._draft_data()
+        if self._route_scope is None:
+            self._shared_draft = current
+        elif current != self._editor_baseline:
+            self._device_drafts[self._route_scope] = current
+        self._route_scope = scope
+        draft = self._device_drafts.get(scope, self._shared_draft)
+        self._loading_draft = True
+        try:
+            self._load_editor_draft(draft)
+        finally:
+            self._loading_draft = False
+        self._editor_baseline = self._draft_data()
+        self._last_live_draft = self._editor_baseline
+        self._show_shared_button()
+        self.draw_map(True)
+
+    def _store_current_device_draft(self):
+        if self._route_scope is not None and not self._loading_draft:
+            self._store_device_draft(self._draft_data())
+
+    def _store_device_draft(self, draft):
+        if self._route_scope is not None and draft != self._editor_baseline:
+            self._device_drafts[self._route_scope] = draft
+            self._show_shared_button()
+
+    def _show_shared_button(self):
+        self.restore_shared_button.setVisible(self._route_scope in self._device_drafts)
+
+    def _restore_shared_route(self):
+        scope = self._route_scope
+        self.route_editor.setCurrentIndex(0)
+        self._device_drafts.pop(scope, None)
+        if scope in self.runners:
+            try:
+                self.runners[scope].update(self._run_configuration(self._draft_data()))
+            except ValueError:
+                pass
+
+    def _run_configuration(self, draft):
+        points = [Coordinate(**point) for point in draft["points"]]
+        if len(points) < 2 or route_length(points) < .001:
+            raise ValueError("每台设备的路线至少需要两个不同的路径点。")
+        plan = DynamicPlan(draft["dynamicMode"], draft["dynamicPreset"], draft["interval"],
+                           draft["lowMinutes"] * 60 + draft["lowSeconds"], draft["recovery"])
+        config = Configuration("路线", points[0], points, draft["speed"], draft["jitter"], draft["passes"],
+                               draft["pathVariation"], draft["dynamicSpeed"], plan)
+        config.validate()
+        return config
+
+    def _update_live_route(self):
+        draft = self._draft_data()
+        if draft == self._last_live_draft:
+            return
+        self._last_live_draft = draft
+        self._store_device_draft(draft)
+        if not self.runners:
             return
         try:
-            backend, identifier = self._target()
-            config = self._configuration()
-            if len(config.route) < 2:
-                raise ValueError("路径至少需要两个坐标点。")
-            self.runner = RouteRunner(backend, identifier, config)
-            self.runner.signals.status.connect(self.status.setText)
-            self.runner.signals.point.connect(lambda _: None)
-            self.runner.signals.preview.connect(self._route_preview)
-            self.runner.signals.finished.connect(self._route_finished)
-            self._set_running(True)
-            self.pool.start(self.runner)
+            config = self._run_configuration(draft)
+        except ValueError:
+            return
+        for target, runner in self.runners.items():
+            if target == self._route_scope or (self._route_scope is None and target not in self._device_drafts):
+                runner.update(config)
+
+    def start_route(self):
+        if self.runners or self._device_busy:
+            return
+        try:
+            targets = [action.data() for action in self.route_targets.menu().actions() if action.isChecked()]
+            if not targets:
+                self._target()
+                targets = [self.device_combo.currentData()]
+            current = self._draft_data()
+            shared = current if self._route_scope is None else self._shared_draft
+            configurations = {}
+            for target in targets:
+                draft = current if target == self._route_scope else self._device_drafts.get(target, shared)
+                if draft["textPending"]:
+                    raise ValueError("请先在对应路线中点击“应用到地图”，再开始模拟。")
+                configurations[target] = self._run_configuration(draft)
+            self._run_errors = []
+            self._stopping = False
+            seed = random.getrandbits(64)
+            for index, (target, config) in enumerate(configurations.items()):
+                runner = RouteRunner(self._backend(target), target, config,
+                                     seed + index * 0x9E3779B97F4A7C15, index, len(targets))
+                runner.signals.status.connect(self.status.setText)
+                runner.signals.preview.connect(self._route_preview)
+                runner.signals.finished.connect(self._route_finished)
+                self.runners[target] = runner
+            self._update_action_state()
+            self.live_timer.start()
+            for runner in self.runners.values():
+                self.pool.start(runner)
         except ValueError as exc:
             self.status.setText(str(exc))
 
-    def _route_preview(self, data):
-        points, seed = data
-        stepper = RouteStepper(points, self.variation.value(), seed)
-        spacing = max(4, stepper.total / 3999)
-        preview = [points[0]]
-        while not stepper.finished and len(preview) < 4000:
-            preview.append(stepper.advance(spacing))
-        self.draw_map(False, preview)
+    def _preview_target(self):
+        if self._route_scope is not None:
+            return self._route_scope
+        return next((target for target in self.runners if target not in self._device_drafts), None)
 
-    def _route_finished(self):
-        self.runner = None
-        self._set_running(False)
-        self.draw_map(False)
+    def _route_preview(self, target, preview):
+        self._previews[target] = preview
+        if target == (self._preview_target()):
+            self._js("updatePreview", [asdict(point) for point in preview])
 
-    def _set_running(self, running):
-        for group in self.groups:
-            group.setEnabled(not running)
+    def _route_finished(self, target, error):
+        self.runners.pop(target, None)
+        self._previews.pop(target, None)
+        if error:
+            self._run_errors.append(error)
+        if self.runners:
+            if self._route_scope is None or target == self._route_scope:
+                self.draw_map(False)
+            return
+        self.live_timer.stop()
+        self._previews.clear()
+        if self._run_errors:
+            self.status.setText("；".join(self._run_errors))
+        else:
+            self.status.setText("路径模拟已停止。" if self._stopping else "路径模拟完成。")
         self._update_action_state()
         self.draw_map(False)
 
     def _update_action_state(self):
-        editing = self.runner is None
-        idle = editing and not self._device_busy
+        idle = not self.runners and not self._device_busy
         has_device = self.device_combo.currentData() is not None
         has_place = self.selected_place is not None
         self.device_combo.setEnabled(idle)
+        self.route_targets.setEnabled(idle and has_device)
         self.set_button.setEnabled(idle and has_device)
         self.clear_button.setEnabled(idle and has_device)
         self.start_button.setEnabled(idle and has_device)
-        self.stop_button.setEnabled(not editing and not self.runner.stop_event.is_set())
+        self.stop_button.setEnabled(bool(self.runners) and not self._stopping)
         self.rename_device_button.setEnabled(idle and has_device)
         self.recent_combo.setEnabled(idle)
         self.reconnect_button.setEnabled(idle)
+        self.rename_recent_device_button.setEnabled(idle)
         self.rename_ip_button.setEnabled(idle)
         self.ip_button.setEnabled(idle)
         self.iphone_ip.setEnabled(idle)
-        self.refresh_button.setEnabled(idle)
-        self.wireless_button.setEnabled(idle and self.device_combo.currentData() is not None
-                                        and self.device_combo.currentData()[0] == "ios")
-        self.import_button.setEnabled(editing)
-        self.save_button.setEnabled(editing)
-        self.place_point_button.setEnabled(editing and has_place)
-        self.place_route_button.setEnabled(editing and has_place and not self.text_pending
-                                           and len(self.points) < 10_000)
-        self.undo_button.setEnabled(editing and not self.text_pending and bool(self.points))
-        self.clear_route_button.setEnabled(editing and not self.text_pending and bool(self.points))
-        self.apply_button.setEnabled(editing and self.text_pending)
-        self.track_button.setEnabled(editing)
+        self.refresh_button.setEnabled(idle and not self._refreshing)
+        target = self.device_combo.currentData()
+        self.wireless_button.setEnabled(idle and bool(target and target[0] == "ios"
+                                                      and target[1] in self._usb_iphones))
+        self.place_point_button.setEnabled(has_place)
+        self.place_route_button.setEnabled(has_place and not self.text_pending and len(self.points) < 10_000)
+        self.undo_button.setEnabled(not self.text_pending and bool(self.points))
+        self.clear_route_button.setEnabled(not self.text_pending and bool(self.points))
+        self.apply_button.setEnabled(self.text_pending)
 
     def _device_task(self, fn, done, busy_text, on_error=None):
         self._device_busy = True
@@ -1166,8 +1468,10 @@ class MainWindow(QMainWindow):
         self.pool.start(task)
 
     def stop_route(self):
-        if self.runner:
-            self.runner.stop_event.set()
+        if self.runners:
+            self._stopping = True
+            for runner in self.runners.values():
+                runner.stop_event.set()
             self._update_action_state()
             self.status.setText("正在停止…")
 
@@ -1232,9 +1536,8 @@ class MainWindow(QMainWindow):
         self._button("清除历史", lambda: (self.settings.update(history=[]), self._write_json(SETTINGS, self.settings), listing.clear()), layout)
         dialog.exec()
 
-    def show_settings(self):
+    def show_settings(self, expand_update=False):
         dialog = QDialog(self)
-        self.settings_dialog = dialog
         dialog.setWindowTitle("设置")
         layout = QVBoxLayout(dialog)
         restore = QCheckBox("启动时恢复上次路线")
@@ -1250,12 +1553,17 @@ class MainWindow(QMainWindow):
         appearance.currentIndexChanged.connect(lambda: self._set_appearance(appearance.currentData()))
         layout.addWidget(QLabel("外观"))
         layout.addWidget(appearance)
-        self._button("检查更新", lambda: self.check_for_updates(manual=True), layout)
+        self.update_settings = UpdateSettings(current_version(), lambda: self.check_for_updates(manual=True),
+                                              self._ignore_update)
+        layout.addWidget(self.update_settings)
+        self._refresh_update_settings()
+        if expand_update:
+            self.update_settings.toggle.setChecked(True)
         self._button("清除搜索历史", lambda: self.settings.update(history=[]), layout)
         self._button("清除路线记忆", self._clear_draft, layout)
         self._button("完成", dialog.accept, layout)
         dialog.exec()
-        self.settings_dialog = None
+        self.update_settings = None
         self.settings.update(restore=restore.isChecked(), auto_refresh=auto.isChecked())
         self._write_json(SETTINGS, self.settings)
 
@@ -1264,39 +1572,56 @@ class MainWindow(QMainWindow):
         self._write_json(SETTINGS, self.settings)
         self._apply_style()
 
+    def _show_update_details(self):
+        self.update_banner.hide()
+        self.show_settings(expand_update=True)
+
+    def _refresh_update_settings(self):
+        if self.update_settings:
+            self.update_settings.render(self._update_result, self.settings.get("ignored_update_version", ""),
+                                        self._update_check_running)
+
+    def _ignore_update(self, result):
+        if result and result.should_prompt(self.settings.get("ignored_update_version", "")):
+            self.settings["ignored_update_version"] = result.latest
+            self._write_json(SETTINGS, self.settings)
+            self.update_banner.hide()
+            self._refresh_update_settings()
+
     def check_for_updates(self, manual=False):
-        if getattr(self, "_update_check_running", False):
+        if self._update_check_running:
             return
         self._update_check_running = True
+        self._manual_update_check = manual
+        self._refresh_update_settings()
         task = Task(check_update)
-        task.signals.result.connect(lambda result: self._update_checked(result, manual))
+        task.signals.result.connect(self._update_checked)
         task.signals.error.connect(self._update_check_failed)
-        if manual:
-            self.status.setText("正在检查更新…")
         self.pool.start(task)
 
-    def _update_checked(self, result: UpdateResult, manual: bool):
+    @Slot(object)
+    def _update_checked(self, result: UpdateResult):
+        manual = self._manual_update_check
         self._update_check_running = False
-        if result.required:
-            if getattr(self, "settings_dialog", None):
-                self.settings_dialog.accept()
-            if self.runner:
-                self.stop_route()
-            self.centralWidget().setEnabled(False)
-            self.update_dialog = UpdateRequiredDialog(self, result)
-            self.update_dialog.exec()
-        elif manual:
-            if result.error:
-                QMessageBox.information(self, "检查更新", f"无法连接 GitHub：{result.error}")
-            else:
-                QMessageBox.information(self, "检查更新", f"当前已是最新版本（{result.current}）。")
+        if not result.error:
+            if self._update_result and self._update_result.latest != result.latest:
+                self.update_banner.hide()
+            self._update_result = result
+            if not manual and result.should_prompt(self.settings.get("ignored_update_version", "")):
+                self.update_banner_text.setText(f"AnyWay {result.latest} 已发布")
+                self.update_banner.show()
+        self._refresh_update_settings()
+        if manual and (result.error or not result.available):
+            message = f"无法连接 GitHub：{result.error}" if result.error else f"当前已是最新版本（{result.current}）。"
+            QMessageBox.information(self, "检查更新", message)
 
     def _update_check_failed(self, message):
         self._update_check_running = False
+        self._refresh_update_settings()
         self.status.setText(f"检查更新失败：{message}")
 
     def _clear_draft(self):
-        self._cleared_draft_snapshot = self._draft_data()
+        self._cleared_draft_snapshot = self._draft_data() if self._route_scope is None else self._shared_draft
         DRAFT.unlink(missing_ok=True)
 
     def _draft_data(self):
@@ -1312,8 +1637,8 @@ class MainWindow(QMainWindow):
 
     def _save_draft(self):
         try:
-            data = self._draft_data()
-            if data == self._cleared_draft_snapshot:
+            data = self._draft_data() if self._route_scope is None else self._shared_draft
+            if not data or data == self._cleared_draft_snapshot:
                 return
             self._cleared_draft_snapshot = None
             self._write_json(DRAFT, data)
@@ -1324,8 +1649,10 @@ class MainWindow(QMainWindow):
         if not self.settings.get("restore", True):
             return
         data = self._read_json(DRAFT, {})
-        if not data:
-            return
+        if data:
+            self._load_editor_draft(data)
+
+    def _load_editor_draft(self, data):
         try:
             self.name.setText(data["name"])
             self.latitude.setText(data["latitude"])
@@ -1351,8 +1678,10 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
-        if self.runner:
-            self.runner.stop_event.set()
+        if self.runners:
+            self._stopping = True
+            for runner in self.runners.values():
+                runner.stop_event.set()
             self.status.setText("正在停止路线并清除定位…")
         # Finish in-flight set/clear operations before clearing active mock providers.
         if not self.pool.waitForDone(5000):
@@ -1360,7 +1689,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "请稍候", "设备定位操作仍在进行，请稍后再关闭。")
             return
         self._save_draft()
-        self.ios_session.close()
+        for session in self.ios_sessions.values():
+            session.close()
         self.android_bridge.close()
         self.harmony_bridge.close()
         event.accept()

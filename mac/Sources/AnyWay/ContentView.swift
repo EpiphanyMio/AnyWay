@@ -11,16 +11,22 @@ struct ContentView: View {
     @AppStorage("appearanceMode") private var appearanceMode = "system"
     @AppStorage("hasAcknowledgedResearchNotice") private var hasAcknowledgedResearchNotice = false
     @AppStorage("lastShownReleaseVersion") private var lastShownReleaseVersion = ""
+    @AppStorage("ignoredUpdateVersion") private var ignoredUpdateVersion = ""
     @AppStorage("hideWirelessGuide") private var hideWirelessGuide = false
     @State private var showingResearchNotice = false
     @State private var showingReleaseNotes = false
     @State private var iphoneIP = RecentIPConnection.load().first?.address ?? ""
     @State private var showingWirelessGuide = false
+    @State private var showingWirelessSetup = false
     @State private var wirelessGuideDontShowAgain = false
     @State private var name = "我的路线"
     @State private var latitude = "39.9042"
     @State private var longitude = "116.4074"
     @State private var points: [Coordinate] = []
+    @State private var routeEditorID = ""
+    @State private var deviceDrafts: [String: RouteDraft] = [:]
+    @State private var sharedDraft: RouteDraft?
+    @State private var editorBaseline: RouteDraft?
     @State private var routeText = ""
     @State private var textPending = false
     @State private var fitRevision = 0
@@ -42,6 +48,9 @@ struct ContentView: View {
     @State private var selectingSinglePoint = false
     @State private var showingSettings = false
     @State private var updateMessage: String?
+    @State private var checkedAtStartup = false
+    @State private var startupUpdate: String?
+    @State private var showingUpdateDetails = false
     @State private var showingSearchHistory = false
     @State private var hasLoadedDraft = false
     @State private var hasSavedDraft = false
@@ -51,6 +60,9 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if let version = startupUpdate, version == updateChecker.latestVersion {
+                updateBanner(version)
+            }
             Divider()
             HStack(alignment: .top, spacing: 18) {
                 mapPanel
@@ -76,14 +88,18 @@ struct ContentView: View {
             .padding(.vertical, 12)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .disabled(updateChecker.requiresUpdate)
-        .overlay {
-            if updateChecker.requiresUpdate {
-                updateRequiredView
-            }
-        }
         .onAppear {
-            Task { await updateChecker.check() }
+            if !checkedAtStartup {
+                checkedAtStartup = true
+                Task {
+                    await updateChecker.check()
+                    if let latest = updateChecker.latestVersion,
+                       UpdateChecker.shouldPrompt(current: updateChecker.currentVersion,
+                                                  latest: latest, ignoredThrough: ignoredUpdateVersion) {
+                        startupUpdate = latest
+                    }
+                }
+            }
             if !hasLoadedDraft { restoreDraftIfNeeded() }
             if let notes = ReleaseNotes.load(currentVersion: updateChecker.currentVersion),
                lastShownReleaseVersion != notes.version {
@@ -95,15 +111,20 @@ struct ContentView: View {
         .onChange(of: controller.wirelessPreparationCount) { _ in
             if !hideWirelessGuide { showingWirelessGuide = true }
         }
-        .onChange(of: updateChecker.requiresUpdate) { required in
-            if required {
-                showingSettings = false
-                controller.stop()
-            }
-        }
         .onChange(of: routeDraft) { draft in
-            guard hasLoadedDraft else { return }
-            if RouteDraftStore().save(draft) { hasSavedDraft = true }
+            guard hasLoadedDraft, draft != editorBaseline else { return }
+            editorBaseline = nil
+            if routeEditorID.isEmpty {
+                if RouteDraftStore().save(draft) { hasSavedDraft = true }
+            } else {
+                deviceDrafts[routeEditorID] = draft
+            }
+            if controller.isRunning, let config = try? configuration(from: draft, forRun: true, includePending: false) {
+                for device in controller.selectedDevices where device.id == routeEditorID
+                    || (routeEditorID.isEmpty && deviceDrafts[device.id] == nil) {
+                    controller.updateRun(deviceID: device.id, configuration: config)
+                }
+            }
         }
         .sheet(isPresented: $showingSettings) { settingsSheet }
         .sheet(isPresented: $showingReleaseNotes, onDismiss: {
@@ -231,13 +252,11 @@ struct ContentView: View {
             } label: {
                 Label("导入配置", systemImage: "square.and.arrow.down")
             }
-            .disabled(controller.isRunning)
             Button {
                 saveConfiguration()
             } label: {
                 Label("保存配置", systemImage: "square.and.arrow.up")
             }
-            .disabled(controller.isRunning)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 16)
@@ -267,13 +286,17 @@ struct ContentView: View {
                 Button(updateChecker.isChecking ? "正在检查…" : "检查更新") {
                     Task {
                         await updateChecker.check()
-                        if !updateChecker.requiresUpdate {
-                            updateMessage = updateChecker.lastError.map { "无法连接 GitHub：\($0)" }
-                                ?? "当前已是最新版本（\(updateChecker.currentVersion)）。"
+                        if let error = updateChecker.lastError {
+                            updateMessage = "无法连接 GitHub：\(error)"
+                        } else if !updateChecker.hasUpdate {
+                            updateMessage = "当前已是最新版本（\(updateChecker.currentVersion)）。"
                         }
                     }
                 }
                 .disabled(updateChecker.isChecking)
+            }
+            if updateChecker.hasUpdate, let version = updateChecker.latestVersion {
+                latestVersionRow(version)
             }
             Divider()
             HStack {
@@ -294,29 +317,71 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(width: 460)
+        .onChange(of: updateChecker.latestVersion) { _ in showingUpdateDetails = false }
     }
 
-    private var updateRequiredView: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "arrow.down.circle.fill")
-                .font(.system(size: 42)).foregroundStyle(accent)
-            Text("需要更新 AnyWay").font(.title2.bold())
-            Text("发现新版本 \(updateChecker.latestVersion ?? "")（当前 \(updateChecker.currentVersion)）。请先下载安装最新版，再继续使用。")
-                .multilineTextAlignment(.center)
+    private func updateBanner(_ version: String) -> some View {
+        HStack(spacing: 12) {
+            Label("AnyWay \(version) 已发布", systemImage: "arrow.down.circle")
+                .font(.callout.weight(.semibold))
+            Spacer()
+            Button("查看更新") {
+                startupUpdate = nil
+                showingUpdateDetails = true
+                showingSettings = true
+            }
+            Button("稍后") { startupUpdate = nil }
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 8)
+        .background(accent.opacity(0.1))
+    }
+
+    private func latestVersionRow(_ version: String) -> some View {
+        let canIgnore = UpdateChecker.shouldPrompt(current: updateChecker.currentVersion,
+                                                    latest: version, ignoredThrough: ignoredUpdateVersion)
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Button("退出软件") { NSApp.terminate(nil) }
-                Button("打开新版下载页") {
-                    if let url = updateChecker.releaseURL { NSWorkspace.shared.open(url) }
+                Button {
+                    showingUpdateDetails.toggle()
+                } label: {
+                    Label("最新版本：\(version)", systemImage: showingUpdateDetails ? "chevron.down" : "chevron.right")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
+                .accessibilityHint(showingUpdateDetails ? "收起更新内容" : "展开更新内容")
+                Spacer()
+                Button(canIgnore ? "忽略本次更新" : "已忽略此版本") {
+                    ignoredUpdateVersion = version
+                    startupUpdate = nil
+                }
+                .disabled(!canIgnore)
+            }
+            if showingUpdateDetails {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        let notes = updateChecker.releaseNotes
+                        if notes.isEmpty {
+                            Text("发布页暂无更新说明。").foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(notes.components(separatedBy: .newlines).enumerated()), id: \.offset) { _, line in
+                                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                                if trimmed.hasPrefix("#") {
+                                    Text(trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "# "))).font(.headline)
+                                } else if !trimmed.isEmpty {
+                                    let paragraph = trimmed.hasPrefix("- ") ? "• " + trimmed.dropFirst(2) : trimmed
+                                    Text((try? AttributedString(markdown: paragraph, options: .init(
+                                        interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(paragraph))
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 160)
+                if let url = updateChecker.releaseURL { Link("打开新版下载页", destination: url) }
             }
         }
-        .padding(30)
-        .frame(width: 430)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .shadow(radius: 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black.opacity(0.4))
     }
 
     private var mapPanel: some View {
@@ -338,22 +403,21 @@ struct ContentView: View {
             }
             searchPanel
             RouteMapView(points: points,
-                         previewRoute: controller.previewRoute,
+                         previewRoute: runningPreview,
                          variationMeters: min(20, max(0, Double(pathVariation) ?? 2)),
-                         previewSeed: controller.previewSeed,
+                         previewSeed: 42,
                          fitRevision: fitRevision,
                          searchCoordinate: placeSearch.selected?.coordinate,
                          searchTitle: placeSearch.selected?.name ?? "",
                          focusRevision: placeSearch.focusRevision,
                          singlePoint: try? RouteParser.coordinate(latitude: latitude, longitude: longitude),
-                         editable: !controller.isRunning && !textPending,
+                         editable: !textPending,
                          onPointMoved: { index, point in
-                guard !controller.isRunning, !textPending, points.indices.contains(index) else { return }
+                guard !textPending, points.indices.contains(index) else { return }
                 points[index] = point
                 syncRouteText()
                 controller.status = "已移动第 \(index + 1) 个路径点。"
             }) { point in
-                guard !controller.isRunning else { return }
                 if selectingSinglePoint {
                     latitude = String(point.latitude)
                     longitude = String(point.longitude)
@@ -384,12 +448,12 @@ struct ContentView: View {
                 } label: {
                     Label("撤销上一点", systemImage: "arrow.uturn.backward")
                 }
-                .disabled(points.isEmpty || controller.isRunning)
+                .disabled(points.isEmpty || textPending)
                 Button("清空路线") {
                     points.removeAll()
                     syncRouteText()
                 }
-                .disabled(points.isEmpty || controller.isRunning)
+                .disabled(points.isEmpty || textPending)
                 Spacer()
                 Button {
                     fitRevision += 1
@@ -493,9 +557,8 @@ struct ContentView: View {
                 Spacer(minLength: 4)
                 if placeSearch.selected != nil {
                     Button("设为单点") { useSelectedAsPoint() }
-                        .disabled(controller.isRunning)
                     Button("加入路线") { addSelectedToRoute() }
-                        .disabled(controller.isRunning || points.count >= 10_000)
+                        .disabled(points.count >= 10_000)
                 }
             }
             .buttonStyle(.borderless)
@@ -506,6 +569,21 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 card("目标设备", icon: "iphone.gen3") {
+                    HStack {
+                        Text("已选 \(controller.selectedDevices.count) 台")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        if controller.devices.filter({ $0.kind == .iphone }).count > 1 {
+                            Button("全选 iPhone") { controller.selectAllIPhones() }
+                                .disabled(controller.isBusy)
+                        }
+                        Button {
+                            controller.refresh()
+                        } label: {
+                            Label(controller.isRefreshing ? "刷新中…" : "刷新设备", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(controller.isBusy || controller.isRefreshing)
+                    }
                     VStack(alignment: .leading, spacing: 6) {
                         if controller.devices.isEmpty {
                             Text("没有可用设备").foregroundStyle(.secondary)
@@ -528,33 +606,27 @@ struct ContentView: View {
                                 .toggleStyle(.checkbox)
                                 Spacer()
                                 if device.kind != .simulator {
-                                    RenameButton(title: "设备名称", name: controller.deviceNames[device.id] ?? "") {
-                                        controller.renameDevice(device, to: $0)
+                                    RenameButton(name: controller.deviceNames[device.id] ?? "") {
+                                        controller.renameDevice(id: device.id, to: $0)
                                     }
                                 }
                             }
                             .disabled(controller.isBusy)
                         }
                     }
-                    HStack(spacing: 8) {
-                        Text("已选 \(controller.selectedDevices.count) 台")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("全选 iPhone") { controller.selectAllIPhones() }
-                            .disabled(!controller.hasIPhones || controller.isBusy)
-                        Button { controller.refresh() } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .disabled(controller.isBusy)
-                        .help("刷新模拟器、iPhone 与 Android 设备")
-                    }
+                }
+
+                card("iPhone 无线连接", icon: "wifi") {
                     HStack {
-                        TextField("iPhone 的 Wi-Fi IPv4 地址", text: $iphoneIP)
+                        TextField("iPhone IPv4 地址", text: $iphoneIP)
                             .textFieldStyle(.roundedBorder)
                         Button("通过 IP 连接") { controller.connectIP(iphoneIP) }
+                            .buttonStyle(.borderedProminent)
+                            .tint(accent)
                             .disabled(iphoneIP.isEmpty || controller.isBusy)
                     }
                     if !controller.recentIPs.isEmpty {
+                        Divider()
                         Text("最近使用").font(.caption).foregroundStyle(.secondary)
                         ForEach(controller.recentIPs) { entry in
                             HStack {
@@ -563,31 +635,57 @@ struct ContentView: View {
                                     controller.connectIP(entry.address, expectedUDID: entry.udid)
                                 } label: {
                                     VStack(alignment: .leading) {
-                                        Text(entry.name.isEmpty ? entry.address : entry.name)
-                                        let phone = controller.deviceNames["iphone:" + entry.udid] ?? "iPhone · " + entry.udid.suffix(8)
-                                        Text(entry.name.isEmpty ? phone : "\(phone) · \(entry.address)")
+                                        Text(controller.deviceNames[entry.deviceID] ?? "iPhone · " + entry.udid.suffix(8))
+                                        Text(entry.name.isEmpty ? entry.address : "网络：\(entry.name) · \(entry.address)")
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
                                 .buttonStyle(.borderless)
                                 .help("重新连接此 iPhone")
                                 Spacer()
-                                RenameButton(title: "网络名称", name: entry.name) {
-                                    controller.renameConnection(entry, to: $0)
+                                RenameButton(name: controller.deviceNames[entry.deviceID] ?? "", network: (
+                                    entry.name, { controller.renameConnection(entry, to: $0) }
+                                )) {
+                                    controller.renameDevice(id: entry.deviceID, to: $0)
                                 }
                             }
                             .disabled(controller.isBusy)
                         }
                     }
-                    Button("开启 iPhone 无线连接") { controller.prepareWirelessIPhones() }
-                        .disabled(controller.isBusy || !controller.selectedDevices.contains(where: { $0.kind == .iphone }))
+                    Divider()
+                    Button {
+                        showingWirelessSetup.toggle()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: showingWirelessSetup ? "chevron.down" : "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 12)
+                            Text("首次无线配对")
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(showingWirelessSetup ? "已展开" : "已收起")
+                    if showingWirelessSetup {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("用 USB 连接并选中 iPhone，再开启无线连接。")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Button("开启无线连接") { controller.prepareWirelessIPhones() }
+                                .disabled(controller.isBusy || !controller.selectedDevices.contains {
+                                    $0.kind == .iphone && $0.isUSB
+                                })
+                        }
+                        .padding(.top, 6)
+                    }
                 }
 
                 card("单点定位", icon: "mappin.circle") {
                     Button(selectingSinglePoint ? "退出地图选点" : "在地图上选点") {
                         selectingSinglePoint.toggle()
                     }
-                    .disabled(controller.isRunning)
                     Text(selectingSinglePoint ? "在左侧地图单击目标位置，坐标会自动填入下方。"
                          : "可以输入坐标、搜索地点，或在地图上选点。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -605,6 +703,27 @@ struct ContentView: View {
                 }
 
                 card("路径编辑", icon: "point.topleft.down.curvedto.point.bottomright.up") {
+                    Picker("编辑路线", selection: Binding(
+                        get: { routeEditorID }, set: { switchRouteEditor(to: $0) }
+                    )) {
+                        Text("共用配置").tag("")
+                        ForEach(controller.devices) { device in
+                            Text(controller.deviceNames[device.id] ?? device.name).tag(device.id)
+                        }
+                        if !routeEditorID.isEmpty && !controller.devices.contains(where: { $0.id == routeEditorID }) {
+                            Text("已断开的设备").tag(routeEditorID)
+                        }
+                    }
+                    if !routeEditorID.isEmpty, deviceDrafts[routeEditorID] != nil {
+                        Button("恢复使用共用配置") {
+                            let deviceID = routeEditorID
+                            switchRouteEditor(to: "")
+                            deviceDrafts.removeValue(forKey: deviceID)
+                            if let config = try? configuration(from: routeDraft, forRun: true, includePending: false) {
+                                controller.updateRun(deviceID: deviceID, configuration: config)
+                            }
+                        }
+                    }
                     field("方案名称", text: $name)
                     Picker("", selection: $editorMode) {
                         Text("地图绘制").tag(0)
@@ -625,9 +744,8 @@ struct ContentView: View {
                         .font(.system(.caption, design: .monospaced))
                         .frame(height: 118)
                         .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.quaternary))
-                        .disabled(controller.isRunning)
                         Button("应用到地图") { applyRouteText() }
-                            .disabled(!textPending || controller.isRunning)
+                            .disabled(!textPending)
                         Text("每行：纬度,经度")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
@@ -645,8 +763,7 @@ struct ContentView: View {
                     Text("方向按第 1 点到第 2 点判断；两点需相距 20～199 米。")
                         .font(.caption2).foregroundStyle(.secondary)
                     Button("由两个端点生成跑道") { generateTrack() }
-                        .disabled(controller.isRunning)
-                }
+                            }
 
                 card("移动参数", icon: "speedometer") {
                     HStack(spacing: 8) {
@@ -689,7 +806,7 @@ struct ContentView: View {
                         }
                     }
                     field("路线偏移上限 m", text: $pathVariation)
-                    Text("每圈生成不同的平滑轨迹；中途路径点带小幅偏差，闭合点保持准确。")
+                    Text("每圈在路线附近生成不同轨迹。偏移设为 0 时使用 0.5 米上限，短路线按比例缩小。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -744,6 +861,14 @@ struct ContentView: View {
         textPending = false
     }
 
+    private var runningPreview: [Coordinate] {
+        if !routeEditorID.isEmpty { return controller.previews[routeEditorID] ?? [] }
+        for device in controller.selectedDevices where deviceDrafts[device.id] == nil {
+            if let preview = controller.previews[device.id] { return preview }
+        }
+        return []
+    }
+
     private var routeDraft: RouteDraft {
         RouteDraft(name: name, latitude: latitude, longitude: longitude,
                    points: points, routeText: routeText, textPending: textPending,
@@ -762,34 +887,53 @@ struct ContentView: View {
         let store = RouteDraftStore()
         hasSavedDraft = store.hasSavedDraft
         if restoreLastRoute, let draft = store.load() {
-            name = draft.name
-            latitude = draft.latitude
-            longitude = draft.longitude
-            points = draft.points
-            routeText = draft.routeText
-            textPending = draft.textPending
-            speed = draft.speed
-            if let speedValue = Double(draft.speed),
-               let pace = RunningPace.components(speed: speedValue) {
-                paceMinutes = String(pace.minutes)
-                paceSeconds = String(pace.seconds)
-            }
-            jitter = draft.jitter
-            passes = draft.passes
-            pathVariation = draft.pathVariation
-            dynamicSpeed = draft.dynamicSpeed
-            if let dynamicDraft = draft.dynamicSpeedDraft {
-                dynamicMode = dynamicDraft.mode
-                dynamicPreset = dynamicDraft.preset
-                recoveryEveryKm = dynamicDraft.intervalKilometers
-                lowPaceMinutes = dynamicDraft.lowPaceMinutes
-                lowPaceSeconds = dynamicDraft.lowPaceSeconds
-                recoverySeconds = dynamicDraft.recoverySeconds
-            }
-            editorMode = draft.editorMode
-            fitRevision += 1
+            applyDraft(draft)
         }
         hasLoadedDraft = true
+    }
+
+    private func applyDraft(_ draft: RouteDraft) {
+        name = draft.name
+        latitude = draft.latitude
+        longitude = draft.longitude
+        points = draft.points
+        routeText = draft.routeText
+        textPending = draft.textPending
+        speed = draft.speed
+        if let speedValue = Double(draft.speed),
+           let pace = RunningPace.components(speed: speedValue) {
+            paceMinutes = String(pace.minutes)
+            paceSeconds = String(pace.seconds)
+        }
+        jitter = draft.jitter
+        passes = draft.passes
+        pathVariation = draft.pathVariation
+        dynamicSpeed = draft.dynamicSpeed
+        if let dynamicDraft = draft.dynamicSpeedDraft {
+            dynamicMode = dynamicDraft.mode
+            dynamicPreset = dynamicDraft.preset
+            recoveryEveryKm = dynamicDraft.intervalKilometers
+            lowPaceMinutes = dynamicDraft.lowPaceMinutes
+            lowPaceSeconds = dynamicDraft.lowPaceSeconds
+            recoverySeconds = dynamicDraft.recoverySeconds
+        }
+        editorMode = draft.editorMode
+        fitRevision += 1
+    }
+
+    private func switchRouteEditor(to deviceID: String) {
+        guard deviceID != routeEditorID else { return }
+        let current = routeDraft
+        if routeEditorID.isEmpty {
+            sharedDraft = current
+        } else if current != editorBaseline {
+            deviceDrafts[routeEditorID] = current
+        }
+        guard let sharedDraft else { return }
+        routeEditorID = deviceID
+        let next = deviceDrafts[deviceID] ?? sharedDraft
+        editorBaseline = next
+        applyDraft(next)
     }
 
     private func syncSpeedFromPace() {
@@ -860,8 +1004,8 @@ struct ContentView: View {
         placeSearch.rememberCurrentQuery()
         latitude = String(selected.coordinate.latitude)
         longitude = String(selected.coordinate.longitude)
-        if !controller.hasSelectedDevices {
-            controller.status = "已将“\(selected.name)”填入单点坐标；请选择设备后设置定位。"
+        if controller.isBusy || !controller.hasSelectedDevices {
+            controller.status = "已将“\(selected.name)”填入单点坐标。"
         } else {
             controller.setPoint(selected.coordinate)
         }
@@ -883,63 +1027,63 @@ struct ContentView: View {
         controller.status = "已将“\(selected.name)”加入路线。"
     }
 
-    private func currentConfiguration() throws -> RouteConfiguration {
-        guard let minutes = Int(paceMinutes), let seconds = Int(paceSeconds),
-              RunningPace.speed(minutes: minutes, seconds: seconds) != nil,
-              let speedValue = Double(speed), let jitterValue = Double(jitter),
-              let passCount = Int(passes),
-              let variationValue = Double(pathVariation) else { throw ConfigurationError.invalidSettings }
-        let plan = try dynamicSpeedPlan(baseSpeed: speedValue)
+    private func configuration(from draft: RouteDraft, forRun: Bool = false,
+                               includePending: Bool = true) throws -> RouteConfiguration {
+        guard let speed = Double(draft.speed), let jitter = Double(draft.jitter),
+              let passes = Int(draft.passes), let variation = Double(draft.pathVariation) else {
+            throw ConfigurationError.invalidSettings
+        }
+        let route = includePending && draft.textPending ? try RouteParser.parse(draft.routeText) : draft.points
+        let point = if forRun, let first = route.first {
+            first
+        } else {
+            try RouteParser.coordinate(latitude: draft.latitude, longitude: draft.longitude)
+        }
         return try RouteConfiguration(
-            name: name,
-            point: RouteParser.coordinate(latitude: latitude, longitude: longitude),
-            route: resolvedPoints(),
-            speedMetersPerSecond: speedValue,
-            jitterPercent: jitterValue,
-            passes: passCount,
-            pathVariationMeters: variationValue,
-            dynamicSpeed: dynamicSpeed,
-            dynamicSpeedPlan: plan
+            name: forRun ? "路线" : draft.name,
+            point: point,
+            route: route,
+            speedMetersPerSecond: speed,
+            jitterPercent: jitter,
+            passes: passes,
+            pathVariationMeters: variation,
+            dynamicSpeed: draft.dynamicSpeed,
+            dynamicSpeedPlan: dynamicSpeedPlan(from: draft)
         )
     }
 
-    private func dynamicSpeedPlan(baseSpeed: Double) throws -> DynamicSpeedPlan {
-        if dynamicMode == .automatic {
-            return DynamicSpeedPlan(mode: .automatic, preset: dynamicPreset,
-                                    intervalKilometers: 0.8, lowPaceSeconds: 600,
-                                    recoverySeconds: 25)
+    private func dynamicSpeedPlan(from draft: RouteDraft) throws -> DynamicSpeedPlan {
+        guard let settings = draft.dynamicSpeedDraft else { return .standard }
+        if settings.mode == .automatic {
+            return DynamicSpeedPlan(mode: .automatic, preset: settings.preset, intervalKilometers: 0.8,
+                                    lowPaceSeconds: 600, recoverySeconds: 25)
         }
-        guard let interval = Double(recoveryEveryKm),
-              let minutes = Int(lowPaceMinutes), let seconds = Int(lowPaceSeconds),
+        guard let interval = Double(settings.intervalKilometers),
+              let minutes = Int(settings.lowPaceMinutes), let seconds = Int(settings.lowPaceSeconds),
               RunningPace.speed(minutes: minutes, seconds: seconds) != nil,
-              let duration = Double(recoverySeconds) else {
-            if dynamicSpeed { throw ConfigurationError.invalidDynamicSpeed }
+              let duration = Double(settings.recoverySeconds) else {
+            if draft.dynamicSpeed { throw ConfigurationError.invalidDynamicSpeed }
             return .standard
         }
-        let plan = DynamicSpeedPlan(mode: .custom, preset: dynamicPreset,
-                                    intervalKilometers: interval,
-                                    lowPaceSeconds: minutes * 60 + seconds,
-                                    recoverySeconds: duration)
-        if dynamicSpeed && !plan.isValid(baseSpeed: baseSpeed) {
-            throw ConfigurationError.invalidDynamicSpeed
-        }
-        return plan
+        return DynamicSpeedPlan(mode: .custom, preset: settings.preset, intervalKilometers: interval,
+                                lowPaceSeconds: minutes * 60 + seconds, recoverySeconds: duration)
     }
 
     private func startRoute() {
         do {
-            let config = try currentConfiguration()
-            guard config.route.count >= 2 else { throw RouteError.tooFewPoints }
-            if textPending {
-                points = config.route
-                textPending = false
-                fitRevision += 1
+            let current = routeDraft
+            let shared = sharedDraft ?? current
+            var configurations: [String: RouteConfiguration] = [:]
+            for device in controller.selectedDevices {
+                let draft = routeEditorID.isEmpty ? deviceDrafts[device.id] ?? current
+                    : device.id == routeEditorID && current != editorBaseline ? current
+                    : deviceDrafts[device.id] ?? shared
+                guard !draft.textPending else {
+                    throw SimctlError.failed("请先在对应路线中点击“应用到地图”，再开始模拟。")
+                }
+                configurations[device.id] = try configuration(from: draft, forRun: true)
             }
-            controller.start(points: config.route, speed: config.speedMetersPerSecond,
-                             jitter: config.jitterPercent, loops: config.passes,
-                             variationMeters: config.pathVariationMeters,
-                             dynamicSpeed: config.dynamicSpeed,
-                             dynamicSpeedPlan: config.dynamicSpeedPlan)
+            controller.start(configurations: configurations)
         } catch {
             controller.status = error.localizedDescription
         }
@@ -947,7 +1091,7 @@ struct ContentView: View {
 
     private func saveConfiguration() {
         do {
-            let config = try currentConfiguration()
+            let config = try configuration(from: routeDraft)
             let data = try ConfigurationCodec.encode(config)
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.json]
@@ -1002,31 +1146,43 @@ struct ContentView: View {
 
 
 private struct RenameButton: View {
-    let title: String
     let name: String
+    var network: (name: String, save: (String) -> Void)? = nil
     let save: (String) -> Void
     @State private var editing = false
     @State private var draft = ""
+    @State private var networkDraft = ""
 
     var body: some View {
         Button {
             draft = name
+            networkDraft = network?.name ?? ""
             editing = true
         } label: {
             Image(systemName: "pencil")
         }
         .buttonStyle(.borderless)
-        .accessibilityLabel("编辑" + title)
-        .help("编辑" + title)
+        .accessibilityLabel(network == nil ? "编辑设备名称" : "编辑设备和网络名称")
+        .help(network == nil ? "编辑设备名称" : "编辑设备和网络名称")
         .popover(isPresented: $editing) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(title).font(.headline)
+                Text("设备名称").font(.headline)
                 TextField("留空恢复默认显示", text: $draft)
                     .textFieldStyle(.roundedBorder)
+                if network != nil {
+                    Text("网络名称").font(.headline)
+                    TextField("例如：校园网", text: $networkDraft)
+                        .textFieldStyle(.roundedBorder)
+                }
                 HStack {
                     Spacer()
                     Button("取消") { editing = false }.keyboardShortcut(.cancelAction)
-                    Button("保存") { save(draft); editing = false }.keyboardShortcut(.defaultAction)
+                    Button("保存") {
+                        if draft != name { save(draft) }
+                        if let network, networkDraft != network.name { network.save(networkDraft) }
+                        editing = false
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
             }
             .padding().frame(width: 250)

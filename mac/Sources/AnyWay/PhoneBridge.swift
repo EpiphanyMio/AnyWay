@@ -117,6 +117,10 @@ final class PhoneBridge: @unchecked Sendable {
         try session(for: udid).clear(address: address)
     }
 
+    func setKeepAwake(_ enabled: Bool, udid: String) throws {
+        try session(for: udid).setKeepAwake(enabled)
+    }
+
     private func session(for udid: String) -> Session {
         lock.lock()
         defer { lock.unlock() }
@@ -130,6 +134,7 @@ final class PhoneBridge: @unchecked Sendable {
         private let udid: String
         private let lock = NSLock()
         private var process: Process?
+        private var activeAddress: String?
         private var input: FileHandle?
         private var output: FileHandle?
 
@@ -156,8 +161,15 @@ final class PhoneBridge: @unchecked Sendable {
             try send(["action": "clear"])
         }
 
+        func setKeepAwake(_ enabled: Bool) throws {
+            lock.lock()
+            defer { lock.unlock() }
+            guard process?.isRunning == true else { return }
+            try send(["action": enabled ? "keep-awake" : "allow-sleep"])
+        }
+
         private func connect(address: String?) throws {
-            if process?.isRunning == true { return }
+            if process?.isRunning == true, activeAddress == address { return }
             disconnect()
             guard FileManager.default.isExecutableFile(atPath: PhoneBridge.pythonURL.path) else {
                 throw SimctlError.failed("缺少 iPhone Python 支持组件。请运行 scripts/install-iphone-support.sh 后重新打开应用。")
@@ -175,6 +187,7 @@ final class PhoneBridge: @unchecked Sendable {
             task.standardError = FileHandle.nullDevice
             try task.run()
             process = task
+            activeAddress = address
             input = inputPipe.fileHandleForWriting
             output = outputPipe.fileHandleForReading
             let response: [String: Any]
@@ -223,6 +236,7 @@ final class PhoneBridge: @unchecked Sendable {
             output?.closeFile()
             if process?.isRunning == true { process?.terminate() }
             process = nil
+            activeAddress = nil
             input = nil
             output = nil
         }

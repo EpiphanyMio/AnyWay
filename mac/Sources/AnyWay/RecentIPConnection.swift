@@ -5,6 +5,7 @@ struct RecentIPConnection: Identifiable, Equatable, Sendable {
     let udid: String
     var name: String
     var id: String { "\(udid)@\(address)" }
+    var deviceID: String { LocationDevice.identifier(kind: .iphone, udid: udid) }
 
     static func load(from defaults: UserDefaults = .standard) -> [Self] {
         let legacy = defaults.dictionary(forKey: "directIPhone") as? [String: String]

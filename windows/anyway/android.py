@@ -43,14 +43,14 @@ class AndroidBridge:
         self._active: set[str] = set()
         self._lock = threading.RLock()
 
-    def _broadcast(self, serial: str, command: str, point: Coordinate | None = None):
+    def _broadcast(self, serial: str, command: str, point: Coordinate | None = None, *, timeout: float = 20):
         args = [_adb(), "-s", serial, "shell", "am", "broadcast", "-n", RECEIVER,
                 "-a", ACTION, "--es", "command", command]
         if point is not None:
             args += ["--es", "latitude", f"{point.latitude:.8f}",
                      "--es", "longitude", f"{point.longitude:.8f}"]
         try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=20,
+            result = subprocess.run(args, capture_output=True, text=True, timeout=timeout,
                                     encoding="utf-8", errors="replace",
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired as exc:
@@ -65,6 +65,9 @@ class AndroidBridge:
         self._broadcast(serial, "set", point)
         with self._lock:
             self._active.add(serial)
+
+    def set_keep_awake(self, serial: str, enabled: bool):
+        self._broadcast(serial, "keep-awake" if enabled else "allow-sleep", timeout=4)
 
     def clear(self, serial: str):
         self._broadcast(serial, "clear")

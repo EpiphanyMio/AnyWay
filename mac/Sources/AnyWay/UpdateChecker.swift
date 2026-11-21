@@ -20,6 +20,7 @@ struct ReleaseVersion: Comparable {
 final class UpdateChecker: ObservableObject {
     @Published private(set) var latestVersion: String?
     @Published private(set) var releaseURL: URL?
+    @Published private(set) var releaseNotes = ""
     @Published private(set) var lastError: String?
     @Published private(set) var isChecking = false
 
@@ -33,10 +34,16 @@ final class UpdateChecker: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0.0.0"
     }
 
-    var requiresUpdate: Bool {
+    var hasUpdate: Bool {
         guard let latestVersion, let latest = ReleaseVersion(latestVersion),
               let current = ReleaseVersion(currentVersion) else { return false }
         return latest > current
+    }
+
+    static func shouldPrompt(current: String, latest: String, ignoredThrough: String) -> Bool {
+        guard let latest = ReleaseVersion(latest), let current = ReleaseVersion(current),
+              latest > current else { return false }
+        return ReleaseVersion(ignoredThrough).map { latest > $0 } ?? true
     }
 
     func check() async {
@@ -57,6 +64,7 @@ final class UpdateChecker: ObservableObject {
             guard ReleaseVersion(release.tag_name) != nil else {
                 throw URLError(.cannotParseResponse)
             }
+            releaseNotes = release.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             latestVersion = release.tag_name.hasPrefix("v")
                 ? String(release.tag_name.dropFirst()) : release.tag_name
             releaseURL = URL(string: "https://github.com/EpiphanyMio/AnyWay/releases/tag/\(release.tag_name)")
@@ -66,5 +74,8 @@ final class UpdateChecker: ObservableObject {
         }
     }
 
-    private struct Release: Decodable { let tag_name: String }
+    private struct Release: Decodable {
+        let tag_name: String
+        let body: String?
+    }
 }

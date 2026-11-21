@@ -32,7 +32,7 @@ class Coordinate:
         return Coordinate(self.latitude + (other.latitude - self.latitude) * t, longitude)
 
     def offset(self, east: float, north: float) -> Coordinate:
-        if abs(self.latitude) >= 89.9:
+        if (east == 0 and north == 0) or abs(self.latitude) >= 89.9:
             return self
         latitude = self.latitude + math.degrees(north / EARTH)
         if abs(latitude) >= 90:
@@ -191,11 +191,12 @@ def generate_track(start: Coordinate, end: Coordinate, side: str) -> list[Coordi
 
 
 class RouteStepper:
-    def __init__(self, points: list[Coordinate], variation: float, seed: int):
+    def __init__(self, points: list[Coordinate], variation: float, seed: int, offset=(0.0, 0.0)):
         if len(points) < 2:
             raise ValueError("路径至少需要两个点。")
         self.points, self.variation, self.seed = points, variation, seed
         self.total = route_length(points)
+        self.offset = offset
         self.segment = 0
         self.into = 0.0
         self.travelled = 0.0
@@ -227,11 +228,11 @@ class RouteStepper:
             self.travelled += available
             self.segment += 1
             self.into = 0
-        return self.points[-1]
+        return self.points[-1].offset(*self.offset)
 
     def _drift(self, center: Coordinate) -> Coordinate:
         if self.variation <= 0 or self.total <= 0:
-            return center
+            return center.offset(*self.offset)
         d = self.travelled
         p, w = self.phases, self.wavelengths
         east = .7 * math.sin(2 * math.pi * d / w[0] + p[0]) + .3 * math.sin(2 * math.pi * d / w[1] + p[1])
@@ -239,7 +240,7 @@ class RouteStepper:
         envelope = math.sin(math.pi * min(1, d / self.total)) ** 2
         limit = min(self.variation, self.total * .12) * envelope
         scale = limit / max(1, math.hypot(east, north))
-        return center.offset(east * scale, north * scale)
+        return center.offset(self.offset[0] + east * scale, self.offset[1] + north * scale)
 
 
 class MotionProfile:
@@ -247,9 +248,10 @@ class MotionProfile:
               "easy": ((400, 700), (25, 40), (.9, 1.2)),
               "endurance": ((1200, 1800), (15, 25), (1.2, 1.5))}
 
-    def __init__(self, speed: float, enabled: bool, plan: DynamicPlan, seed: int):
+    def __init__(self, speed: float, enabled: bool, plan: DynamicPlan, seed: int, interval_multiplier=1.0):
         self.speed, self.enabled, self.plan = speed, enabled, plan
         self.rng = random.Random(seed)
+        self.interval_multiplier = interval_multiplier
         self.running_meters = 0.0
         self.recovery_left = 0.0
         self.recovery_speed = 0.0
@@ -257,7 +259,7 @@ class MotionProfile:
 
     def _interval(self) -> float:
         if self.plan.mode == "custom":
-            return self.plan.intervalKilometers * 1000
+            return self.plan.intervalKilometers * 1000 * self.interval_multiplier
         return self.rng.uniform(*self.RANGES[self.plan.preset][0])
 
     def advance(self, seconds: float, multiplier: float = 1.0) -> float:
@@ -290,3 +292,72 @@ class MotionProfile:
                         self.recovery_speed = max(.25, min(self.speed * .55, self.rng.uniform(*speed_range)))
         return distance
 
+
+class LiveRoute:
+    def __init__(self, config: Configuration, seed: int, index: int, count: int):
+        self.config = config
+        self.seed = seed
+        self.random = random.Random(seed)
+        self.separated = count > 1
+        self.angle = 2 * math.pi * index / count
+        self.interval_multiplier = .96 + .08 * index / (count - 1) if self.separated else 1
+        self.lap = 0
+        self.speed_offset = 0.0
+        self.motion = self._motion(config)
+        self.stepper = self._stepper(config)
+        self.point = self.stepper.advance(0)
+        self.preview_changed = True
+
+    @property
+    def finished(self):
+        return self.lap >= self.config.passes
+
+    def _motion(self, config):
+        return MotionProfile(config.speedMetersPerSecond, config.dynamicSpeed, config.dynamicSpeedPlan,
+                             self.seed + self.lap, self.interval_multiplier)
+
+    def _stepper(self, config):
+        points = closed(config.route)
+        limit = min(config.pathVariationMeters or .5, route_length(points) * .12)
+        radius = .4 * limit if self.separated else 0
+        return RouteStepper(points, limit - radius, self.seed + self.lap,
+                            (radius * math.cos(self.angle), radius * math.sin(self.angle)))
+
+    def update(self, config):
+        if config is self.config:
+            return
+        old = self.config
+        if (config.dynamicSpeed, config.dynamicSpeedPlan) != (old.dynamicSpeed, old.dynamicSpeedPlan):
+            self.motion = self._motion(config)
+        self.motion.speed = config.speedMetersPerSecond
+        if config.route != old.route or config.pathVariationMeters != old.pathVariationMeters:
+            progress = min(1, self.stepper.travelled / max(.001, self.stepper.total))
+            self.stepper = self._stepper(config)
+            self.point = self.stepper.advance(progress * self.stepper.total)
+            self.preview_changed = True
+        self.config = config
+
+    def preview(self):
+        self.preview_changed = False
+        current = self.stepper
+        stepper = RouteStepper(current.points, current.variation, current.seed, current.offset)
+        spacing = max(4, stepper.total / 3999)
+        samples = [stepper.advance(0)]
+        while not stepper.finished and len(samples) < 3999:
+            samples.append(stepper.advance(spacing))
+        if not stepper.finished:
+            samples.append(stepper.advance(stepper.total))
+        return samples
+
+    def advance(self, seconds):
+        if self.finished:
+            return self.point
+        jitter = max(.02 if self.separated else 0, self.config.jitterPercent / 100)
+        self.speed_offset = .8 * self.speed_offset + .2 * self.random.uniform(-jitter, jitter)
+        self.point = self.stepper.advance(self.motion.advance(seconds, 1 + self.speed_offset))
+        if self.stepper.finished:
+            self.lap += 1
+            if not self.finished:
+                self.stepper = self._stepper(self.config)
+                self.preview_changed = True
+        return self.point

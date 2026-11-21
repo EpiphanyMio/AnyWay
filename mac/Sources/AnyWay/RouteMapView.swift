@@ -94,9 +94,9 @@ struct RouteMapView: NSViewRepresentable {
             coordinator.renderedVariation = variationMeters
             coordinator.renderedSeed = previewSeed
             map.removeOverlays(map.overlays)
-            let samples = RoutePreview.sample(points: routeToPreview,
-                                              variationMeters: variationMeters,
-                                              seed: previewSeed)
+            let samples = previewRoute.isEmpty
+                ? RoutePreview.sample(points: routeToPreview, variationMeters: variationMeters, seed: previewSeed)
+                : previewRoute
             if samples.count >= 2 {
                 let coordinates = samples.map {
                     CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)

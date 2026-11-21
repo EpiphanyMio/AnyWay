@@ -7,6 +7,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from pymobiledevice3.exceptions import ConnectionTerminatedError
 from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
 from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
+from pymobiledevice3.services.power_assertion import PowerAssertionService
 from .iphone_wireless import device_inventory, ip_tunnel, location_tunnel, prepare_wireless
 
 
@@ -38,9 +39,35 @@ async def check_ip(address, udid=None):
         raise RuntimeError("打开 iPhone 定位服务超时，请解锁手机并检查开发者模式。") from exc
 
 
+class RoutePowerAssertion:
+    def __init__(self, device):
+        self.device = device
+        self.active = None
+
+    async def renew(self):
+        service = PowerAssertionService(self.device)
+        try:
+            # Overlap requests so replacing the service does not drop the assertion.
+            async with service.create_power_assertion("PreventUserIdleSystemSleep", "AnyWay route simulation", 30):
+                pass
+        except BaseException:
+            await service.close()
+            raise
+        previous, self.active = self.active, service
+        if previous is not None:
+            await previous.close()
+
+    async def close(self):
+        if self.active is not None:
+            await self.active.close()
+            self.active = None
+
+
 async def run(udid, address=None):
     async with location_tunnel(udid, address) as device:
-        async with location_service(device) as location:
+        async with location_service(device) as location, AsyncExitStack() as resources:
+            power = RoutePowerAssertion(device)
+            resources.push_async_callback(power.close)
             reply(ready=True)
             while True:
                 line = await asyncio.to_thread(sys.stdin.readline)
@@ -51,6 +78,12 @@ async def run(udid, address=None):
                     request = json.loads(line)
                     if request.get("action") == "set":
                         await location.set(float(request["latitude"]), float(request["longitude"]))
+                        reply(ok=True)
+                    elif request.get("action") == "keep-awake":
+                        await asyncio.wait_for(power.renew(), timeout=3)
+                        reply(ok=True)
+                    elif request.get("action") == "allow-sleep":
+                        await asyncio.wait_for(power.close(), timeout=3)
                         reply(ok=True)
                     elif request.get("action") == "clear":
                         await location.clear()

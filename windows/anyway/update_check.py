@@ -19,16 +19,22 @@ class UpdateResult:
     latest: str | None
     release_url: str
     error: str | None = None
+    notes: str = ""
 
     @property
-    def required(self) -> bool:
+    def available(self) -> bool:
         current = parse_version(self.current)
         latest = parse_version(self.latest or "")
         return current is not None and latest is not None and latest > current
 
 
+    def should_prompt(self, ignored_through: str = "") -> bool:
+        ignored = parse_version(ignored_through)
+        return self.available and (ignored is None or parse_version(self.latest or "") > ignored)
+
+
 def parse_version(value: str) -> tuple[int, int, int] | None:
-    match = _VERSION.fullmatch(value)
+    match = _VERSION.fullmatch(value) if isinstance(value, str) else None
     return tuple(map(int, match.groups())) if match else None
 
 
@@ -49,7 +55,8 @@ def check_update(version: str | None = None) -> UpdateResult:
         tag = release["tag_name"]
         if parse_version(tag) is None:
             raise ValueError("发布版本号格式无效")
-        return UpdateResult(current, tag.removeprefix("v"),
-                            f"{RELEASES_URL}/tag/{tag}")
+        notes = release.get("body")
+        return UpdateResult(current, tag.removeprefix("v"), f"{RELEASES_URL}/tag/{tag}",
+                            notes=notes.strip() if isinstance(notes, str) else "")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return UpdateResult(current, None, RELEASES_URL, str(exc))

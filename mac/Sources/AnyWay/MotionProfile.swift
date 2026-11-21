@@ -72,7 +72,7 @@ enum DynamicSpeedPreset: String, Codable, CaseIterable {
     }
 }
 
-struct DynamicSpeedPlan: Codable, Equatable {
+struct DynamicSpeedPlan: Codable, Equatable, Sendable {
     let mode: DynamicSpeedMode
     let preset: DynamicSpeedPreset
     let intervalKilometers: Double
@@ -95,25 +95,27 @@ struct DynamicSpeedPlan: Codable, Equatable {
 
 /// Keeps the recovery cycle continuous across lap boundaries.
 struct MotionProfile {
-    let runningSpeed: Double
+    var runningSpeed: Double
     let dynamicSpeed: Bool
     let plan: DynamicSpeedPlan
     private var random: MotionRandom
+    private let intervalMultiplier: Double
     private var runningMeters = 0.0
     private var nextRecoveryMeters = 0.0
     private var recoverySeconds = 0.0
     private var recoverySpeed = 0.0
 
     init(runningSpeed: Double, dynamicSpeed: Bool, seed: UInt64,
-         plan: DynamicSpeedPlan = .standard) {
+         plan: DynamicSpeedPlan = .standard, intervalMultiplier: Double = 1) {
         precondition(runningSpeed.isFinite && runningSpeed > 0)
         precondition(!dynamicSpeed || plan.isValid(baseSpeed: runningSpeed))
         self.runningSpeed = runningSpeed
         self.dynamicSpeed = dynamicSpeed
         self.plan = plan
+        self.intervalMultiplier = intervalMultiplier
         self.random = MotionRandom(seed: seed)
         if plan.mode == .custom {
-            self.nextRecoveryMeters = plan.intervalKilometers * 1_000
+            self.nextRecoveryMeters = plan.intervalKilometers * 1_000 * intervalMultiplier
         } else {
             let range = plan.preset.intervalMeters
             self.nextRecoveryMeters = range.lowerBound + random.unit() * (range.upperBound - range.lowerBound)
@@ -139,7 +141,7 @@ struct MotionProfile {
                     recoverySeconds = 0
                     runningMeters = 0
                     if plan.mode == .custom {
-                        nextRecoveryMeters = plan.intervalKilometers * 1_000
+                        nextRecoveryMeters = plan.intervalKilometers * 1_000 * intervalMultiplier
                     } else {
                         let range = plan.preset.intervalMeters
                         nextRecoveryMeters = range.lowerBound

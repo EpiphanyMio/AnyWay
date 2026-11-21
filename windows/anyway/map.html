@@ -44,6 +44,12 @@ function init() {
       bridge.pointMoved(drag.index,position.lat,position.lng);
   });
 }
+function updatePreview(preview) {
+  if(!map || activeDrag || preview.length<2)return;
+  const path=preview.map(p=>[p.latitude,p.longitude]);
+  if(routePolyline)routePolyline.setLatLngs(path);
+  else routePolyline=L.polyline(path,{color:'#0d9488',weight:4}).addTo(routeLayer);
+}
 function draw(points, preview, single, search, fit, editable) {
   if(!map)return;
   if(activeDrag){activeDrag=null;map.dragging.enable();}

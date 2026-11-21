@@ -89,6 +89,7 @@ class PhoneSession:
         self._lock = threading.RLock()
         self._process: subprocess.Popen | None = None
         self._udid: str | None = None
+        self._address: str | None = None
 
     def _read(self, timeout: float = 30) -> dict:
         process = self._process
@@ -111,13 +112,14 @@ class PhoneSession:
             raise RuntimeError("iPhone 定位服务返回无效数据。") from exc
 
     def _connect(self, udid: str):
-        if self._process is not None and self._process.poll() is None and self._udid == udid:
+        address = self.direct_addresses.get(udid)
+        if (self._process is not None and self._process.poll() is None
+                and self._udid == udid and self._address == address):
             return
         if self._process is not None:
             self._disconnect()
         command = (_helper_command("--iphone-bridge", udid) if getattr(sys, "frozen", False)
                    else [sys.executable, "-u", "-m", "anyway.iphone_bridge", udid])
-        address = self.direct_addresses.get(udid)
         if address:
             command.append(address)
         self._process = subprocess.Popen(
@@ -127,12 +129,13 @@ class PhoneSession:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         self._udid = udid
+        self._address = address
         response = self._read(timeout=60)
         if response.get("ready") is not True:
             self._disconnect()
             raise RuntimeError("无法连接 iPhone 开发者定位服务：" + str(response.get("error", "未知错误")))
 
-    def _send(self, request: dict):
+    def _send(self, request: dict, timeout: float = 30):
         process = self._process
         if process is None or process.stdin is None:
             raise RuntimeError("iPhone 定位会话已断开。")
@@ -142,7 +145,7 @@ class PhoneSession:
         except (BrokenPipeError, OSError) as exc:
             self._disconnect()
             raise RuntimeError("iPhone 定位会话已断开。") from exc
-        response = self._read()
+        response = self._read(timeout)
         if response.get("ok") is not True:
             raise RuntimeError(str(response.get("error", "iPhone 定位操作失败。")))
 
@@ -150,6 +153,11 @@ class PhoneSession:
         with self._lock:
             self._connect(udid)
             self._send({"action": "set", "latitude": point.latitude, "longitude": point.longitude})
+
+    def set_keep_awake(self, udid: str, enabled: bool):
+        with self._lock:
+            if self._udid == udid and self._process is not None and self._process.poll() is None:
+                self._send({"action": "keep-awake" if enabled else "allow-sleep"}, timeout=6)
 
     def clear(self, udid: str):
         with self._lock:
@@ -172,6 +180,7 @@ class PhoneSession:
         process = self._process
         self._process = None
         self._udid = None
+        self._address = None
         if process is not None:
             try:
                 process.terminate()

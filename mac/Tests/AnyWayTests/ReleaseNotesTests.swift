@@ -2,6 +2,14 @@ import XCTest
 @testable import AnyWay
 
 final class ReleaseNotesTests: XCTestCase {
+    @MainActor
+    func testNewerReleasePromptsAfterIgnoredVersion() {
+        XCTAssertTrue(UpdateChecker.shouldPrompt(current: "0.2.0", latest: "0.2.9", ignoredThrough: ""))
+        XCTAssertFalse(UpdateChecker.shouldPrompt(current: "0.2.0", latest: "0.2.9", ignoredThrough: "0.2.9"))
+        XCTAssertFalse(UpdateChecker.shouldPrompt(current: "0.2.0", latest: "0.2.8", ignoredThrough: "0.2.9"))
+        XCTAssertTrue(UpdateChecker.shouldPrompt(current: "0.2.0", latest: "0.2.10", ignoredThrough: "0.2.9"))
+    }
+
     func testReleaseNotesMatchProductVersion() {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()

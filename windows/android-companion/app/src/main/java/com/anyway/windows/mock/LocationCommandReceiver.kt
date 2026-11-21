@@ -6,6 +6,7 @@ import android.content.Intent
 import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
+import android.os.PowerManager
 import android.os.SystemClock
 
 @Suppress("DEPRECATION")
@@ -45,6 +46,19 @@ class LocationCommandReceiver : BroadcastReceiver() {
                         catch (_: IllegalArgumentException) { }
                     }
                 }
+                "keep-awake" -> {
+                    val power = requireNotNull(context.getSystemService(PowerManager::class.java)) {
+                        "Android 电源服务不可用"
+                    }
+                    val lock = routeWakeLock ?: power.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK, "AnyWay:RouteSimulation"
+                    ).apply {
+                        setReferenceCounted(false)
+                        routeWakeLock = this
+                    }
+                    lock.acquire(30_000)
+                }
+                "allow-sleep" -> routeWakeLock?.takeIf { it.isHeld }?.release()
                 else -> error("未知定位命令")
             }
             setResultCode(200) // distinct from the default broadcast result 0
@@ -57,6 +71,7 @@ class LocationCommandReceiver : BroadcastReceiver() {
 
     companion object {
         private const val ACTION = "com.anyway.windows.mock.LOCATION_COMMAND"
+        private var routeWakeLock: PowerManager.WakeLock? = null
         private val PROVIDERS = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
     }
 }

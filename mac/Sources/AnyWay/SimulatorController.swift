@@ -30,7 +30,9 @@ struct LocationDevice: Identifiable, Sendable {
         self.kind = kind
         self.needsDeveloperMode = needsDeveloperMode
     }
-    var id: String {
+    var id: String { Self.identifier(kind: kind, udid: udid) }
+
+    static func identifier(kind: Kind, udid: String) -> String {
         let prefix: String
         switch kind {
         case .simulator: prefix = "sim"
@@ -93,23 +95,14 @@ enum Simctl {
 }
 
 enum DeviceBackend {
-    static func availableDevices(lastIP: RecentIPConnection?) throws -> [LocationDevice] {
+    static func availableDevices() throws -> [LocationDevice] {
         let simulators = ((try? Simctl.bootedDevices()) ?? []).map {
             LocationDevice(name: "\($0.name) · 模拟器", udid: $0.udid, kind: .simulator)
         }
         let iphones = Result { try PhoneBridge.connectedDevices() }
         let androids = Result { try AndroidBridge.connectedDevices() }
-        var found = simulators + ((try? iphones.get()) ?? [])
+        let found = simulators + ((try? iphones.get()) ?? [])
             + ((try? androids.get()) ?? [])
-        if let saved = lastIP, !found.contains(where: { $0.udid == saved.udid && $0.isUSB }) {
-            do {
-                let direct = try PhoneBridge.checkIP(saved.address, expectedUDID: saved.udid)
-                found.removeAll { $0.id == direct.id }
-                found.append(direct)
-            } catch {
-                if found.isEmpty { throw error }
-            }
-        }
         if found.isEmpty {
             if case .failure(let error) = iphones { throw error }
             if case .failure(let error) = androids { throw error }
@@ -122,6 +115,14 @@ enum DeviceBackend {
         case .simulator: try Simctl.set(coordinate, device: device.udid)
         case .iphone: try PhoneBridge.shared.set(coordinate, udid: device.udid, address: device.address)
         case .android: try AndroidBridge.set(coordinate, serial: device.udid)
+        }
+    }
+
+    static func setKeepAwake(_ enabled: Bool, device: LocationDevice) throws {
+        switch device.kind {
+        case .simulator: break
+        case .iphone: try PhoneBridge.shared.setKeepAwake(enabled, udid: device.udid)
+        case .android: try AndroidBridge.setKeepAwake(enabled, serial: device.udid)
         }
     }
 
@@ -141,8 +142,8 @@ final class SimulatorController: ObservableObject {
     @Published var status = "请连接设备，然后刷新。"
     @Published private(set) var isRunning = false
     @Published private(set) var isApplying = false
-    @Published private(set) var previewRoute: [Coordinate] = []
-    @Published private(set) var previewSeed: UInt64 = 42
+    @Published private(set) var previews: [String: [Coordinate]] = [:]
+    @Published private(set) var isRefreshing = false
     @Published var ipConnectionError: String?
     @Published var developerModeGuideDevice: LocationDevice?
     @Published private(set) var wirelessPreparationCount = 0
@@ -158,6 +159,7 @@ final class SimulatorController: ObservableObject {
     }
 
     private var runningTask: Task<Void, Never>?
+    private var liveConfigurations: [String: RouteConfiguration] = [:]
     private let tickSeconds = 0.5
 
     var selectedDevices: [LocationDevice] {
@@ -165,7 +167,6 @@ final class SimulatorController: ObservableObject {
     }
 
     var hasSelectedDevices: Bool { !selectedDevices.isEmpty }
-    var hasIPhones: Bool { devices.contains { $0.kind == .iphone } }
     var isBusy: Bool { isRunning || isApplying }
 
     func setSelected(_ id: String, isSelected: Bool) {
@@ -180,7 +181,7 @@ final class SimulatorController: ObservableObject {
     }
 
     func prepareWirelessIPhones() {
-        let targets = selectedDevices.filter { $0.kind == .iphone }
+        let targets = selectedDevices.filter { $0.kind == .iphone && $0.isUSB }
         guard !isBusy, !targets.isEmpty else { return }
         isApplying = true
         status = "正在为 iPhone 开启无线连接…"
@@ -209,9 +210,9 @@ final class SimulatorController: ObservableObject {
         RecentIPConnection.save(recentIPs, to: defaults)
     }
 
-    func renameDevice(_ device: LocationDevice, to name: String) {
+    func renameDevice(id: String, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        deviceNames[device.id] = trimmed.isEmpty ? nil : trimmed
+        deviceNames[id] = trimmed.isEmpty ? nil : trimmed
         defaults.set(deviceNames, forKey: "deviceAliases")
     }
 
@@ -238,13 +239,19 @@ final class SimulatorController: ObservableObject {
     }
 
     func refresh() {
-        guard !isBusy else { return }
-        isApplying = true
+        guard !isBusy, !isRefreshing else { return }
+        isRefreshing = true
         Task {
-            defer { isApplying = false }
+            defer { isRefreshing = false }
             do {
-                let lastIP = recentIPs.first
-                let found = try await Task.detached { try DeviceBackend.availableDevices(lastIP: lastIP) }.value
+                var found = try await Task.detached { try DeviceBackend.availableDevices() }.value
+                guard !isBusy else { return }
+                // Keep IP devices selected by the user unless they are now connected by USB.
+                let direct = devices.filter { device in
+                    device.address != nil && !found.contains { $0.id == device.id && $0.isUSB }
+                }
+                found.removeAll { item in direct.contains { $0.id == item.id } }
+                found += direct
                 devices = found
                 selectedDeviceIDs.formIntersection(Set(found.map(\.id)))
                 if selectedDeviceIDs.isEmpty, let first = found.first {
@@ -291,81 +298,127 @@ final class SimulatorController: ObservableObject {
         }
     }
 
-    func start(points: [Coordinate], speed: Double, jitter: Double,
-               loops: Int, variationMeters: Double, dynamicSpeed: Bool,
-               dynamicSpeedPlan: DynamicSpeedPlan) {
-        guard hasSelectedDevices, !isBusy,
-              points.count >= 2, speed.isFinite, speed > 0,
-              jitter.isFinite, (0...100).contains(jitter), loops >= 1,
-              variationMeters.isFinite, (0...20).contains(variationMeters),
-              !dynamicSpeed || dynamicSpeedPlan.isValid(baseSpeed: speed) else { return }
+    func updateRun(deviceID: String, configuration: RouteConfiguration) {
+        guard liveConfigurations[deviceID] != nil,
+              RouteLoop.closed(configuration.route).hasLength else { return }
+        liveConfigurations[deviceID] = configuration
+    }
+
+    func start(configurations: [String: RouteConfiguration]) {
         let targets = selectedDevices
+        guard !isBusy, !targets.isEmpty, targets.allSatisfy({
+            configurations[$0.id].map { RouteLoop.closed($0.route).hasLength } ?? false
+        }) else {
+            status = "每台设备的路线至少需要两个不同的路径点。"
+            return
+        }
+        liveConfigurations = configurations
         isRunning = true
-        status = "开始向 \(targets.count) 台设备同步路径模拟。"
+        status = "正在为 \(targets.count) 台设备启动路径模拟…"
+        let seed = UInt64.random(in: 0...UInt64.max)
         runningTask = Task {
-            var speedOffset = 0.0
-            let runSeed = UInt64.random(in: UInt64.min...UInt64.max)
-            var motion = MotionProfile(runningSpeed: speed, dynamicSpeed: dynamicSpeed,
-                                       seed: runSeed, plan: dynamicSpeedPlan)
-            let loopPoints = RouteLoop.closed(points)
-            do {
-                try await send(loopPoints[0], to: targets)
-                for pass in 0..<loops {
-                    try Task.checkCancellation()
-                    let seed = runSeed &+ UInt64(pass)
-                    previewRoute = loopPoints
-                    previewSeed = seed
-                    var stepper = RouteStepper(points: loopPoints,
-                                               variationMeters: variationMeters, seed: seed)
-                    status = "正在运行第 \(pass + 1)/\(loops) 圈。"
-                    var lastUpdate = ProcessInfo.processInfo.systemUptime
-                    while !stepper.isFinished {
-                        let wait = max(0, tickSeconds - (ProcessInfo.processInfo.systemUptime - lastUpdate))
-                        if wait > 0 {
-                            try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            let activity = ProcessInfo.processInfo.beginActivity(
+                options: .idleSystemSleepDisabled, reason: "AnyWay route simulation")
+            defer { ProcessInfo.processInfo.endActivity(activity) }
+            let failures = await withTaskGroup(of: String?.self) { group in
+                for (index, device) in targets.enumerated() {
+                    group.addTask {
+                        let failure: String?
+                        do {
+                            try await self.run(device, seed: seed &+ UInt64(index) &* 0x9E3779B97F4A7C15,
+                                               index: index, count: targets.count)
+                            failure = nil
+                        } catch is CancellationError {
+                            failure = nil
+                        } catch {
+                            failure = "\(device.name)：\(error.localizedDescription)"
                         }
-                        let now = ProcessInfo.processInfo.systemUptime
-                        let elapsed = max(0.001, now - lastUpdate)
-                        lastUpdate = now
-                        let target = Double.random(in: -jitter / 100...jitter / 100)
-                        speedOffset = 0.8 * speedOffset + 0.2 * target
-                        let distance = motion.advance(seconds: elapsed,
-                                                      speedMultiplier: 1 + speedOffset)
-                        let next = stepper.advance(meters: distance)
-                        try await send(next, to: targets)
-                        if dynamicSpeed {
-                            let segment = motion.isRecovering
-                                ? (dynamicSpeedPlan.mode == .custom ? " · 低速段" : " · 慢走休息") : ""
-                            status = "正在运行第 \(pass + 1)/\(loops) 圈\(segment)。"
-                        }
+                        _ = await Self.setKeepAwake(false, device: device)
+                        return failure
                     }
                 }
-                status = "路径模拟完成。定位停留在最后一个点；可点击“清除定位”。"
-            } catch is CancellationError {
-                status = "路径模拟已停止。定位停留在当前点。"
-            } catch {
-                status = error.localizedDescription
+                var failures: [String] = []
+                for await error in group {
+                    if let error { failures.append(error) }
+                }
+                return failures
             }
-            previewRoute = []
+            if Task.isCancelled {
+                status = "路径模拟已停止。定位停留在当前点。"
+            } else if failures.isEmpty {
+                status = "路径模拟完成。定位停留在最后一个点。"
+            } else {
+                status = resultStatus(action: "路径模拟", count: targets.count, failures: failures)
+            }
+            previews.removeAll()
+            liveConfigurations.removeAll()
             isRunning = false
             runningTask = nil
         }
+    }
+
+    private func run(_ device: LocationDevice, seed: UInt64, index: Int, count: Int) async throws {
+        guard let initial = liveConfigurations[device.id] else { return }
+        var route = LiveRoute(configuration: initial, seed: seed, index: index, count: count)
+        try await setRoutePoint(route.point, on: device)
+        try Task.checkCancellation()
+        let supportsWake = await Self.setKeepAwake(true, device: device)
+        var wakeAvailable = supportsWake
+        var nextWakeRenewal = ProcessInfo.processInfo.systemUptime + 15
+        var lastUpdate = ProcessInfo.processInfo.systemUptime
+        var previousStatus = ""
+        defer { previews.removeValue(forKey: device.id) }
+        while !route.finished {
+            try Task.checkCancellation()
+            if let latest = liveConfigurations[device.id] { route.update(latest) }
+            if route.finished { break }
+            if route.previewChanged {
+                previews[device.id] = route.preview()
+            }
+            let name = deviceNames[device.id] ?? device.name
+            let recovery = route.isRecovering ? " · 低速段" : ""
+            let wakeStatus = wakeAvailable ? "" : " · 设备端防休眠不可用"
+            let progress = "\(name) · 第 \(route.lap + 1)/\(route.configuration.passes) 圈\(recovery)\(wakeStatus)"
+            if progress != previousStatus {
+                status = progress
+                previousStatus = progress
+            }
+            let wait = max(0, tickSeconds - (ProcessInfo.processInfo.systemUptime - lastUpdate))
+            try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            try Task.checkCancellation()
+            if supportsWake && device.kind != .simulator && ProcessInfo.processInfo.systemUptime >= nextWakeRenewal {
+                wakeAvailable = await Self.setKeepAwake(true, device: device)
+                nextWakeRenewal = ProcessInfo.processInfo.systemUptime + (wakeAvailable ? 15 : 4)
+            }
+            let now = ProcessInfo.processInfo.systemUptime
+            if let latest = liveConfigurations[device.id] { route.update(latest) }
+            if route.finished { break }
+            try await setRoutePoint(route.advance(seconds: now - lastUpdate), on: device)
+            lastUpdate = now
+        }
+    }
+
+    private static func setKeepAwake(_ enabled: Bool, device: LocationDevice) async -> Bool {
+        if device.kind == .simulator { return true }
+        return await Task.detached {
+            do {
+                try DeviceBackend.setKeepAwake(enabled, device: device)
+                return true
+            } catch {
+                return false
+            }
+        }.value
+    }
+
+    private func setRoutePoint(_ point: Coordinate, on device: LocationDevice) async throws {
+        try Task.checkCancellation()
+        try await Task.detached { try DeviceBackend.set(point, device: device) }.value
     }
 
     func stop() {
         guard isRunning else { return }
         status = "正在停止…"
         runningTask?.cancel()
-    }
-
-    private func send(_ coordinate: Coordinate, to targets: [LocationDevice]) async throws {
-        try Task.checkCancellation()
-        let failures = await apply(to: targets) { try DeviceBackend.set(coordinate, device: $0) }
-        try Task.checkCancellation()
-        if !failures.isEmpty {
-            throw SimctlError.failed(resultStatus(action: "路径模拟", count: targets.count,
-                                                  failures: failures))
-        }
     }
 
     private func apply(to targets: [LocationDevice],

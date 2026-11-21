@@ -60,6 +60,10 @@ enum AndroidBridge {
         try broadcast(["--es", "action", "clear"], serial: serial)
     }
 
+    static func setKeepAwake(_ enabled: Bool, serial: String) throws {
+        try broadcast(["--es", "action", enabled ? "keep-awake" : "allow-sleep"], serial: serial)
+    }
+
     private static func broadcast(_ extras: [String], serial: String) throws {
         let output = try run(["-s", serial, "shell", "am", "broadcast",
                               "--receiver-foreground", "-n", component] + extras)

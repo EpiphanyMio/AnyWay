@@ -8,7 +8,9 @@ from unittest.mock import patch
 
 if importlib.util.find_spec("PySide6") is not None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout, QWidget
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QMainWindow, QToolButton, QVBoxLayout, QWidget
     from anyway import app
     from anyway.user_data import recent_ip_connections
 else:
@@ -26,8 +28,9 @@ class DevicePanelTests(unittest.TestCase):
             window.settings = {"direct_iphone": {"address": "192.0.2.1", "udid": "A"}}
             window.device_aliases = window.settings.setdefault("device_aliases", {})
             window.recent_ips = recent_ip_connections(window.settings)
-            window.groups = []
-            window.ios_session = app.PhoneSession()
+            window.route_editor = QComboBox(window)
+            window._route_scope = None
+            window.direct_iphone_addresses = {}
             panel = QWidget(window)
             window._build_device_panel(QVBoxLayout(panel))
             window.status = QLabel(window)
@@ -50,10 +53,28 @@ class DevicePanelTests(unittest.TestCase):
             self.assertIn("我的手机", window.device_combo.currentText())
             self.assertIn("USB", window.device_combo.currentText())
             self.assertIn("校园网", window.recent_combo.currentText())
-            self.assertIn("我的手机", window.recent_combo.currentText())
+            self.assertTrue(window.recent_combo.currentText().startswith("我的手机"))
+            self.assertIn("网络：校园网", window.recent_combo.currentText())
+            with patch.object(app.QInputDialog, "getText", return_value=("新名称", True)):
+                window.rename_recent_device_button.click()
+            self.assertTrue(window.device_combo.currentText().startswith("新名称"))
+            self.assertTrue(window.recent_combo.currentText().startswith("新名称"))
+
+            window.setCentralWidget(panel)
+            window.show()
+            qt.processEvents()
+            disclosure = next(button for button in panel.findChildren(QToolButton)
+                              if button.text() == "首次无线配对")
+            self.assertFalse(window.wireless_button.isVisible())
+            QTest.mouseClick(disclosure, Qt.MouseButton.LeftButton,
+                             pos=QPoint(disclosure.width() - 20, disclosure.height() // 2))
+            self.assertTrue(window.wireless_button.isVisible())
+            QTest.mouseClick(disclosure, Qt.MouseButton.LeftButton,
+                             pos=QPoint(disclosure.width() - 20, disclosure.height() // 2))
+            self.assertFalse(window.wireless_button.isVisible())
             prefs = json.loads(app.SETTINGS.read_text(encoding="utf-8"))
             self.assertEqual(recent_ip_connections(prefs)[0]["name"], "校园网")
-            self.assertEqual(prefs["device_aliases"]["ios:A"], "我的手机")
+            self.assertEqual(prefs["device_aliases"]["ios:A"], "新名称")
             self.assertEqual(window.device_combo.count(), 1)
             window.deleteLater()
             qt.processEvents()
